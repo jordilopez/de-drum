@@ -9,7 +9,8 @@
     "check": "node scripts/run.mjs src/separate.py --check",
     "test": "node scripts/run.mjs -m pytest",
     "lint": "node scripts/run.mjs -m ruff check src/ tests/",
-    "format": "node scripts/run.mjs -m ruff format src/ tests/ && npx prettier --write ."
+    "format": "node scripts/run.mjs -m ruff format src/ tests/ && npx prettier --write .",
+    "ui": "node scripts/run.mjs src/ui.py"
   },
   "devDependencies": {
     "prettier": "^3.4.0"

@@ -91,6 +91,17 @@ npm run check
 
 ## Usage
 
+### Web UI (no terminal needed) 🌐
+
+```bash
+npm run ui
+```
+
+Opens a browser interface at [http://127.0.0.1:7860](http://127.0.0.1:7860):
+- Paste a YouTube URL or upload a local audio file
+- Choose the Demucs model
+- Download the separated MP3 files directly
+
 ### From a YouTube link
 
 ```bash
