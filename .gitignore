@@ -22,6 +22,9 @@ output/
 *.swp
 *.swo
 
+# Local-only project files
+PLAN.md
+
 # Node
 node_modules/
 
