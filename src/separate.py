@@ -93,11 +93,15 @@ def download_audio(url: str, output_dir: str) -> Path:
     cmd = [
         "yt-dlp",
         "--extract-audio",
-        "--audio-format", "mp3",
-        "--audio-quality", "0",
-        "--output", template,
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        "0",
+        "--output",
+        template,
         "--no-playlist",
-        "--print", "after_move:filepath",
+        "--print",
+        "after_move:filepath",
         url,
     ]
 
@@ -111,7 +115,9 @@ def download_audio(url: str, output_dir: str) -> Path:
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        console.print(f"[red]Error:[/red] yt-dlp failed with exit code {exc.returncode}")
+        console.print(
+            f"[red]Error:[/red] yt-dlp failed with exit code {exc.returncode}"
+        )
         if exc.stderr:
             console.print(exc.stderr)
         sys.exit(1)
@@ -210,9 +216,12 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
             subprocess.run(
                 [
                     "ffmpeg",
-                    "-i", str(wav),
-                    "-codec:a", "libmp3lame",
-                    "-qscale:a", "0",
+                    "-i",
+                    str(wav),
+                    "-codec:a",
+                    "libmp3lame",
+                    "-qscale:a",
+                    "0",
                     "-y",
                     str(mp3_path),
                 ],
