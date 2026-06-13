@@ -1,0 +1,27 @@
+{
+  "name": "de-drum",
+  "version": "1.0.0",
+  "description": "Local drum separation from audio using Demucs + MPS.",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "python3 -m venv .venv && .venv/bin/pip install --upgrade pip -q && .venv/bin/pip install -r requirements.txt -q",
+    "separate": ".venv/bin/python3 src/separate.py",
+    "check": ".venv/bin/python3 src/separate.py --check",
+    "test": ".venv/bin/python3 -m pytest",
+    "lint": ".venv/bin/ruff check src/ tests/",
+    "format": ".venv/bin/ruff format src/ tests/ && npx prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.4.0"
+  },
+  "keywords": [
+    "demucs",
+    "drums",
+    "audio-separation",
+    "yt-dlp",
+    "mps"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
