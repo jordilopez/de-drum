@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Project output
+output/
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# Ruff
+.ruff_cache/
+
+# macOS
+.DS_Store
