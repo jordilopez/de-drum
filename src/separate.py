@@ -3,9 +3,11 @@
 
 import argparse
 import logging
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -60,6 +62,70 @@ def check_environment() -> bool:
         console.print("[yellow]⚠[/yellow] yt-dlp not found — YouTube URLs won't work")
 
     return ok
+
+
+# ---------------------------------------------------------------------------
+# YouTube download
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_filename(name: str) -> str:
+    """Remove or replace characters that are problematic in filenames."""
+    return re.sub(r'[\\/:*?"<>|]', "_", name).strip(". ")
+
+
+def download_audio(url: str, output_dir: str) -> Path:
+    """Download audio from a YouTube URL using yt-dlp.
+
+    Args:
+        url: YouTube URL.
+        output_dir: Directory where the audio file will be saved.
+
+    Returns:
+        Path to the downloaded audio file.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # yt-dlp template: save as <output_dir>/<title>.mp3
+    template = str(out_dir / "%(title)s.%(ext)s")
+
+    cmd = [
+        "yt-dlp",
+        "--extract-audio",
+        "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "--output", template,
+        "--no-playlist",
+        "--print", "after_move:filepath",
+        url,
+    ]
+
+    console.print(f"Downloading audio from [cyan]{url}[/cyan]...")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        console.print(f"[red]Error:[/red] yt-dlp failed with exit code {exc.returncode}")
+        if exc.stderr:
+            console.print(exc.stderr)
+        sys.exit(1)
+
+    # yt-dlp --print filename outputs the final file path
+    downloaded = result.stdout.strip().splitlines()[-1] if result.stdout else None
+
+    if not downloaded or not Path(downloaded).exists():
+        console.print("[red]Error:[/red] Could not determine downloaded file path.")
+        sys.exit(1)
+
+    audio_path = Path(downloaded)
+    console.print(f"[green]✓[/green] Downloaded [bold]{audio_path.name}[/bold]")
+    return audio_path
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +200,35 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
         # If the model subdirectory doesn't exist, Demucs may have saved directly
         final_out = demucs_out
 
+    # Convert WAV outputs to MP3 with prefix naming
+    if final_out.exists():
+        wav_files = list(final_out.glob("*.wav"))
+        for wav in wav_files:
+            stem = wav.stem  # e.g. "drums" or "no_drums"
+            mp3_name = f"{source_path.stem}_{stem}.mp3"
+            mp3_path = final_out / mp3_name
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i", str(wav),
+                    "-codec:a", "libmp3lame",
+                    "-qscale:a", "0",
+                    "-y",
+                    str(mp3_path),
+                ],
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+            wav.unlink()  # remove the original WAV
+
     # List output
     if final_out.exists():
         files = list(final_out.iterdir())
         console.print(
             f"\n[green]✓[/green] Done — [bold]{len(files)}[/bold] file(s) in [bold]{final_out}[/bold]:"
         )
-        for f in files:
+        for f in sorted(files):
             size = f.stat().st_size / 1024 / 1024
             console.print(f"  [bold]{f.name}[/bold] ({size:.1f} MB)")
     else:
@@ -221,14 +309,23 @@ def main() -> None:
     )
 
     if is_url:
-        console.print(f"Downloading audio from [cyan]{source}[/cyan]...")
-        # TODO: Phase 3 — yt-dlp integration
-        console.print(
-            "[yellow]YouTube download not yet implemented — coming in Phase 3.[/yellow]"
-        )
-        sys.exit(1)
-
-    separate(source, args.output, args.model)
+        # Use a temp directory for the download
+        tmp_dir = Path(tempfile.mkdtemp(prefix="dedrum_"))
+        audio_path = download_audio(source, str(tmp_dir))
+        separate(str(audio_path), args.output, args.model)
+        # Cleanup
+        if not args.keep_original:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        else:
+            # Move downloaded file into the song output directory
+            song_dir = Path(args.output) / audio_path.stem
+            song_dir.mkdir(parents=True, exist_ok=True)
+            dst = song_dir / audio_path.name
+            shutil.move(str(audio_path), str(dst))
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            console.print(f"Original kept at [bold]{dst}[/bold]")
+    else:
+        separate(source, args.output, args.model)
 
 
 if __name__ == "__main__":
