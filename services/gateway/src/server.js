@@ -42,6 +42,12 @@ await app.register(rateLimit, {
 //   - /api/jobs/*      → quota alta (polling, necessari per UX)
 //   - Afegir cua de jobs amb 429 Retry-After quan el backend estigui saturation
 //   - Quota per IP o per API key si es vol multi-tenant
+//
+// TODO(future): Cloudflare Workers migration
+//   - Gateway stateless → fàcil de portar a Worker
+//   - Problema: límit de payload (100 MB Free, 500 MB Paid)
+//   - Solució: upload directe a R2 amb presigned URL, Worker només
+//     notifica al backend amb l'object key
 
 // ─── Routes ────────────────────────────────────────────────────────
 
