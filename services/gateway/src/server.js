@@ -37,6 +37,12 @@ await app.register(rateLimit, {
   timeWindow: "1 minute",
 });
 
+// TODO(future): Throttling per endpoint
+//   - /api/separate/*  → quota baixa (cada request triga minuts, pocs users)
+//   - /api/jobs/*      → quota alta (polling, necessari per UX)
+//   - Afegir cua de jobs amb 429 Retry-After quan el backend estigui saturation
+//   - Quota per IP o per API key si es vol multi-tenant
+
 // ─── Routes ────────────────────────────────────────────────────────
 
 // ── Health ─────────────────────────────────────────────────────────
