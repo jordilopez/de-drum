@@ -242,6 +242,10 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
     console.print(f"\n🎵 [bold]Analysis:[/bold]  Tempo [cyan]{bpm_str}[/cyan]  ·  Key [magenta]{key_str}[/magenta]")
     if analysis.get("spectral_map"):
         console.print(f"📊 Spectral map: [bold]{analysis['spectral_map']}[/bold]")
+    if analysis.get("section_desc"):
+        console.print("\n💬 [bold]Section description:[/bold]")
+        for line in analysis["section_desc"].strip().split("\n"):
+            console.print(f"  {line}")
 
     # List output
     if final_out.exists():
