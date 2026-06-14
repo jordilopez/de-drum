@@ -1,33 +1,41 @@
 services:
-  de-drum:
+  # ── Backend: Python FastAPI (audio separation) ───────────────────
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
     image: de-drum:latest
-    container_name: de-drum
+    container_name: de-drum-backend
     restart: unless-stopped
 
-    # ── Ports ───────────────────────────────────────────────────────
-    ports:
-      - '7860:7860'
+    # Override entrypoint to run the FastAPI backend
+    command:
+      - python3
+      - -m
+      - uvicorn
+      - services.backend.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
 
     # ── Volumes ─────────────────────────────────────────────────────
     volumes:
       # Persist separated audio
       - ./output:/app/output
-      # Persist model cache (avoids re-downloading Demucs ~2GB on each run)
+      # Job input files
+      - ./input:/app/input
+      # Persist model cache (avoids re-downloading Demucs ~2GB)
       - cache:/cache
-      # Optional: mount a local .env for OPENROUTER_API_KEY
-      - ./.env:/app/.env:ro
 
     # ── Environment ─────────────────────────────────────────────────
     environment:
-      - GRADIO_SERVER_NAME=0.0.0.0
-      - GRADIO_SERVER_PORT=7860
+      - TORCH_HOME=/cache/torch
+      - DEMUCS_CACHE=/cache/demucs
+      - XDG_CACHE_HOME=/cache/xdg
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
 
-    # ── GPU ─────────────────────────────────────────────────────────
-    # Uncomment the lines below if you have an NVIDIA GPU with the
-    # nvidia-container-toolkit installed on the host:
+    # ── GPU (uncomment for NVIDIA) ──────────────────────────────────
     # deploy:
     #   resources:
     #     reservations:
@@ -38,12 +46,75 @@ services:
 
     # ── Health ──────────────────────────────────────────────────────
     healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/backend/health', timeout=10)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ── Gateway: Node.js Fastify (API gateway for frontend) ───────────
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    image: de-drum-gateway:latest
+    container_name: de-drum-gateway
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - BACKEND_URL=http://backend:8000
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    # ── Health ──────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── UI: Gradio (existing, kept for backward compatibility) ───────
+  de-drum:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: de-drum:latest
+    container_name: de-drum
+    restart: unless-stopped
+    profiles:
+      - legacy
+
+    ports:
+      - "7860:7860"
+
+    volumes:
+      - ./output:/app/output
+      - cache:/cache
+      - ./.env:/app/.env:ro
+
+    environment:
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      - TORCH_HOME=/cache/torch
+      - DEMUCS_CACHE=/cache/demucs
+      - XDG_CACHE_HOME=/cache/xdg
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+
+    healthcheck:
       test:
         [
-          'CMD',
-          'python3',
-          '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:7860/healthz')",
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:7860/healthz', timeout=10)",
         ]
       interval: 30s
       timeout: 10s
