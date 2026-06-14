@@ -6,8 +6,14 @@ variable is set. If missing, all functions gracefully return ``None``.
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 from urllib import request
+
+from dotenv import load_dotenv
+
+# Load .env from project root (if it exists)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _API_KEY_ENV = "OPENROUTER_API_KEY"
 _MODEL = "deepseek/deepseek-chat"  # cheap & capable on OpenRouter

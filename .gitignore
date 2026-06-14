@@ -25,6 +25,9 @@ output/
 # Local-only project files
 PLAN.md
 
+# Environment
+.env
+
 # Node
 node_modules/
 
