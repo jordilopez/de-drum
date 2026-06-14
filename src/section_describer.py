@@ -44,7 +44,7 @@ def _build_prompt(analysis: dict[str, Any]) -> str:
         "",
         f"BPM: {bpm}",
         f"Key: {key}",
-        f"Duration: {duration // 60}:{duration % 60:02d}",
+        f"Duration: {int(duration) // 60}:{int(duration) % 60:02d}",
         f"Sections: {n_sections}",
         "",
         "Columns: loudness(0-1) | Sub | Bass | Low-Mid | Mid | High-Mid | Presence | Air",
