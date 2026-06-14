@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Output / data
+output/
+
+# Model cache (mount as volume)
+cache/
+
+# IDE / OS
+.DS_Store
+*.swp
+
+# Environment
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docs
+*.md
+AGENTS.md
+PLAN.md
+
+# Node
+node_modules/
+package-lock.json

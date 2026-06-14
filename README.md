@@ -89,6 +89,35 @@ npm run check
 
 ---
 
+## Docker 🐳
+
+> **Note**: Inside Docker, Apple Silicon MPS acceleration is **not available**.
+> For GPU acceleration on Linux, install the
+> [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+> and uncomment the GPU section in `docker-compose.yml`.
+
+```bash
+# Build the image (first time only, takes ~10 min)
+npm run docker:build
+
+# Start the UI at http://localhost:7860
+npm run docker:ui
+
+# View logs
+npm run docker:logs
+
+# Run separation from the command line
+npm run docker:separate -- "https://youtube.com/watch?v=..."
+
+# Stop the container
+npm run docker:stop
+```
+
+The model cache (~2 GB) is persisted in a Docker volume, so subsequent runs
+are faster.
+
+---
+
 ## Usage
 
 ### Web UI (no terminal needed) 🌐
@@ -98,6 +127,7 @@ npm run ui
 ```
 
 Opens a browser interface at [http://127.0.0.1:7860](http://127.0.0.1:7860):
+
 - Paste a YouTube URL or upload a local audio file
 - Choose the Demucs model
 - Download the separated MP3 files directly

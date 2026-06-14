@@ -10,7 +10,12 @@
     "test": "node scripts/run.mjs -m pytest",
     "lint": "node scripts/run.mjs -m ruff check src/ tests/",
     "format": "node scripts/run.mjs -m ruff format src/ tests/ && npx prettier --write .",
-    "ui": "node scripts/run.mjs src/ui.py"
+    "ui": "node scripts/run.mjs src/ui.py",
+    "docker:build": "docker compose build",
+    "docker:ui": "docker compose up -d && echo '→ http://localhost:7860'",
+    "docker:logs": "docker compose logs -f",
+    "docker:stop": "docker compose down",
+    "docker:separate": "docker compose run --rm de-drum python3 src/separate.py"
   },
   "devDependencies": {
     "prettier": "^3.4.0"
