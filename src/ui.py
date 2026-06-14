@@ -59,10 +59,16 @@ def _format_analysis(info: dict) -> str:
 def process_url(url: str, model: str, keep_original: bool) -> tuple:
     """Process a YouTube URL.
 
-    Returns (status_markdown, button_update, drums_file_update, no_drums_file_update).
+    Returns (status_markdown, button_update, drums_file, no_drums_file, spec_map).
     """
     if not url.strip():
-        return "⚠️ Please enter a YouTube URL.", gr.update(interactive=True, value="🥁 Separate Drums"), gr.update(visible=False), gr.update(visible=False)
+        return (
+            "⚠️ Please enter a YouTube URL.",
+            gr.update(interactive=True, value="🥁 Separate Drums"),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="dedrum_"))
     try:
@@ -71,12 +77,13 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
 
         drums_path, no_drums_path = _get_output_files(audio_path.stem)
 
-        # Analyse before cleanup (audio file is in tmp_dir)
-        info = _analyze(str(audio_path))
+        # Analyse (pass song output dir so spectral map lands there)
+        song_dir = OUTPUT_DIR / audio_path.stem
+        info = _analyze(str(audio_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
+        spec_map = info.get("spectral_map")
 
         if keep_original:
-            song_dir = OUTPUT_DIR / audio_path.stem
             song_dir.mkdir(parents=True, exist_ok=True)
             dst = song_dir / audio_path.name
             shutil.move(str(audio_path), str(dst))
@@ -88,6 +95,7 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
+            gr.update(visible=bool(spec_map), value=spec_map),
         )
     except Exception as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -96,16 +104,23 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
             gr.update(interactive=True, value="🥁 Separate Drums"),
             gr.update(visible=False),
             gr.update(visible=False),
+            gr.update(visible=False),
         )
 
 
 def process_file(file: Path, model: str) -> tuple:
     """Process a local audio file.
 
-    Returns (status_markdown, button_update, drums_file_update, no_drums_file_update).
+    Returns (status_markdown, button_update, drums_file, no_drums_file, spec_map).
     """
     if file is None:
-        return "⚠️ Please upload an audio file.", gr.update(interactive=True, value="🥁 Separate Drums"), gr.update(visible=False), gr.update(visible=False)
+        return (
+            "⚠️ Please upload an audio file.",
+            gr.update(interactive=True, value="🥁 Separate Drums"),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
 
     file_path = Path(file)
     try:
@@ -113,19 +128,23 @@ def process_file(file: Path, model: str) -> tuple:
         drums_path, no_drums_path = _get_output_files(file_path.stem)
 
         # Analyse
-        info = _analyze(str(file_path))
+        song_dir = OUTPUT_DIR / file_path.stem
+        info = _analyze(str(file_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
+        spec_map = info.get("spectral_map")
 
         return (
             f"✅ **Done!** Click the files below to download.{analysis}",
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
+            gr.update(visible=bool(spec_map), value=spec_map),
         )
     except Exception as e:
         return (
             f"❌ **Error:** {e}",
             gr.update(interactive=True, value="🥁 Separate Drums"),
+            gr.update(visible=False),
             gr.update(visible=False),
             gr.update(visible=False),
         )
@@ -168,6 +187,7 @@ with gr.Blocks(title="de-drum 🥁") as demo:
         with gr.Row():
             url_drums = gr.File(label="🥁 Drums", visible=False)
             url_no_drums = gr.File(label="🎵 No Drums", visible=False)
+        url_spec_map = gr.Image(label="📊 Spectral density map", visible=False)
 
     # ── Upload File tab ──────────────────────────────────────────────
 
@@ -186,6 +206,7 @@ with gr.Blocks(title="de-drum 🥁") as demo:
         with gr.Row():
             file_drums = gr.File(label="🥁 Drums", visible=False)
             file_no_drums = gr.File(label="🎵 No Drums", visible=False)
+        file_spec_map = gr.Image(label="📊 Spectral density map", visible=False)
 
     # ── Event wiring ─────────────────────────────────────────────────
 
@@ -196,6 +217,7 @@ with gr.Blocks(title="de-drum 🥁") as demo:
             url_status: "⏳ **Processing…** this may take a while.",
             url_drums: gr.update(visible=False),
             url_no_drums: gr.update(visible=False),
+            url_spec_map: gr.update(visible=False),
         }
 
     def _start_file_processing() -> dict:
@@ -204,27 +226,28 @@ with gr.Blocks(title="de-drum 🥁") as demo:
             file_status: "⏳ **Processing…** this may take a while.",
             file_drums: gr.update(visible=False),
             file_no_drums: gr.update(visible=False),
+            file_spec_map: gr.update(visible=False),
         }
 
-    # URL tab chain: start → process → done (button state is handled inside process)
+    # URL tab chain: start → process → done
     url_btn.click(
         fn=_start_processing,
-        outputs=[url_btn, url_status, url_drums, url_no_drums],
+        outputs=[url_btn, url_status, url_drums, url_no_drums, url_spec_map],
     ).then(
         fn=process_url,
         inputs=[url_input, url_model, url_keep],
-        outputs=[url_status, url_btn, url_drums, url_no_drums],
+        outputs=[url_status, url_btn, url_drums, url_no_drums, url_spec_map],
         api_name="separate_url",
     )
 
     # File tab chain
     file_btn.click(
         fn=_start_file_processing,
-        outputs=[file_btn, file_status, file_drums, file_no_drums],
+        outputs=[file_btn, file_status, file_drums, file_no_drums, file_spec_map],
     ).then(
         fn=process_file,
         inputs=[file_input, file_model],
-        outputs=[file_status, file_btn, file_drums, file_no_drums],
+        outputs=[file_status, file_btn, file_drums, file_no_drums, file_spec_map],
         api_name="separate_file",
     )
 

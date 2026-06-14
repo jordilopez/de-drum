@@ -233,13 +233,15 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
             )
             wav.unlink()  # remove the original WAV
 
-    # Analyse original audio (BPM + key)
-    analysis = _analyze(str(source_path.resolve()))
+    # Analyse original audio (BPM + key + spectral map)
+    analysis = _analyze(str(source_path.resolve()), output_dir=str(final_out))
 
     # Show analysis
     bpm_str = f"{analysis['bpm']} BPM" if analysis["bpm"] else "—"
     key_str = analysis["key"] if analysis["key"] else "—"
     console.print(f"\n🎵 [bold]Analysis:[/bold]  Tempo [cyan]{bpm_str}[/cyan]  ·  Key [magenta]{key_str}[/magenta]")
+    if analysis.get("spectral_map"):
+        console.print(f"📊 Spectral map: [bold]{analysis['spectral_map']}[/bold]")
 
     # List output
     if final_out.exists():
