@@ -77,12 +77,14 @@ def _call_api(prompt: str) -> str | None:
     if not api_key:
         return None
 
-    payload = json.dumps({
-        "model": _MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1024,
-        "temperature": 0.3,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": _MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1024,
+            "temperature": 0.3,
+        }
+    ).encode()
 
     headers = {
         "Authorization": f"Bearer {api_key}",

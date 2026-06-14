@@ -239,10 +239,49 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
     # Show analysis
     bpm_str = f"{analysis['bpm']} BPM" if analysis["bpm"] else "—"
     key_str = analysis["key"] if analysis["key"] else "—"
-    console.print(f"\n🎵 [bold]Analysis:[/bold]  Tempo [cyan]{bpm_str}[/cyan]  ·  Key [magenta]{key_str}[/magenta]")
+    ts_str = analysis.get("time_signature") or "—"
+    info_parts = [f"Tempo [cyan]{bpm_str}[/cyan]", f"Key [magenta]{key_str}[/magenta]"]
+    if ts_str != "—":
+        info_parts.append(f"Time [yellow]{ts_str}[/yellow]")
+    console.print("\n🎵 [bold]Analysis:[/bold]  " + "  ·  ".join(info_parts))
+
     if analysis.get("spectral_map"):
         console.print(f"📊 Spectral map: [bold]{analysis['spectral_map']}[/bold]")
-    if analysis.get("section_desc"):
+    sections_parsed = analysis.get("sections_parsed")
+    if sections_parsed:
+        from rich.table import Table
+
+        table = Table(
+            title="Song structure",
+            title_style="bold",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        table.add_column("Time", style="cyan", no_wrap=True)
+        table.add_column("Section", style="bold white")
+        table.add_column("Bars", justify="right")
+        table.add_column("Beats", justify="right")
+        table.add_column("Key", style="magenta")
+        table.add_column("Description")
+        for s in sections_parsed:
+            bars_val = s["bars"]
+            bars_label = (
+                f"{int(bars_val)}"
+                if isinstance(bars_val, int) or bars_val == int(bars_val)
+                else f"{bars_val}"
+            )
+            key_display = s.get("key") or ""
+            table.add_row(
+                f"{s['start']}–{s['end']}",
+                s["section"],
+                bars_label,
+                str(s["beats"]),
+                key_display,
+                s["desc"],
+            )
+        console.print()
+        console.print(table)
+    elif analysis.get("section_desc"):
         console.print("\n💬 [bold]Section description:[/bold]")
         for line in analysis["section_desc"].strip().split("\n"):
             console.print(f"  {line}")

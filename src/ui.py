@@ -31,7 +31,10 @@ def _get_output_files(song_stem: str) -> tuple[str, str]:
     song_dir = OUTPUT_DIR / song_stem
     drums = song_dir / f"{song_stem}_drums.mp3"
     no_drums = song_dir / f"{song_stem}_no_drums.mp3"
-    return (str(drums) if drums.exists() else "", str(no_drums) if no_drums.exists() else "")
+    return (
+        str(drums) if drums.exists() else "",
+        str(no_drums) if no_drums.exists() else "",
+    )
 
 
 def _as_file_update(path: str) -> dict:
@@ -40,15 +43,17 @@ def _as_file_update(path: str) -> dict:
 
 
 def _format_analysis(info: dict) -> str:
-    """Format BPM and key analysis into a Markdown string."""
+    """Format BPM, key and time signature into a Markdown string."""
     parts = []
     if info.get("bpm"):
         parts.append(f"🎵 {info['bpm']} BPM")
     if info.get("key"):
         parts.append(f"🎹 {info['key']}")
-    if parts:
-        return "\n\n" + " · ".join(parts)
-    return ""
+    ts = info.get("time_signature")
+    if ts:
+        parts.append(f"⏱ {ts}")
+
+    return ("\n\n" + " · ".join(parts)) if parts else ""
 
 
 # ---------------------------------------------------------------------------
@@ -56,16 +61,57 @@ def _format_analysis(info: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _fmt_section_desc(desc: str | None) -> str:
-    """Format section description as Markdown, or return empty."""
+def _build_section_table(sections: list[dict]) -> str:
+    """Build an HTML table from parsed section data with key info."""
+    rows = ""
+    for s in sections:
+        bars_val = s["bars"]
+        bars_label = (
+            str(int(bars_val))
+            if isinstance(bars_val, int) or bars_val == int(bars_val)
+            else f"{bars_val}"
+        )
+        key_display = s.get("key") or ""
+        rows += (
+            "<tr>"
+            f"<td style='text-align:center;white-space:nowrap'>{s['start']}–{s['end']}</td>"
+            f"<td style='font-weight:600'>{s['section']}</td>"
+            f"<td style='text-align:center'>{bars_label}</td>"
+            f"<td style='text-align:center'>{s['beats']}</td>"
+            f"<td style='text-align:center'>{key_display}</td>"
+            f"<td>{s['desc']}</td>"
+            "</tr>\n"
+        )
+    return (
+        "💬 **Song structure**\n\n"
+        "<table style='width:100%;border-collapse:collapse;font-size:14px'>\n"
+        "<thead><tr style='background:#f0f0f0'>"
+        "<th style='padding:6px 10px;text-align:center'>Time</th>"
+        "<th style='padding:6px 10px;text-align:left'>Section</th>"
+        "<th style='padding:6px 10px;text-align:center'>Bars</th>"
+        "<th style='padding:6px 10px;text-align:center'>Beats</th>"
+        "<th style='padding:6px 10px;text-align:center'>Key</th>"
+        "<th style='padding:6px 10px;text-align:left'>Description</th>"
+        "</tr></thead>\n"
+        f"<tbody>\n{rows}</tbody>\n"
+        "</table>"
+    )
+
+
+def _fmt_section_desc(info: dict) -> str:
+    """Format section description as HTML table or plain Markdown."""
+    # Prefer structured data for a proper table
+    sections = info.get("sections_parsed")
+    if sections:
+        return _build_section_table(sections)
+
+    desc = info.get("section_desc")
     if not desc:
         return ""
     desc = desc.strip()
     if not desc:
         return ""
-    # The LLM may return a header like "Here's the likely structure…" followed by
-    # blank line then the section lines, or just raw section lines.
-    # Add a consistent header so it's clear in the UI.
+    # Fallback: plain Markdown (no LLM or pre-enrichment)
     return f"💬 **Section description**\n\n{desc}"
 
 
@@ -92,7 +138,7 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
         song_dir = OUTPUT_DIR / audio_path.stem
         info = _analyze(str(audio_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
-        sec_desc = _fmt_section_desc(info.get("section_desc"))
+        sec_desc = _fmt_section_desc(info)
 
         if keep_original:
             song_dir.mkdir(parents=True, exist_ok=True)
@@ -133,7 +179,7 @@ def process_file(file: Path, model: str) -> tuple:
         song_dir = OUTPUT_DIR / file_path.stem
         info = _analyze(str(file_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
-        sec_desc = _fmt_section_desc(info.get("section_desc"))
+        sec_desc = _fmt_section_desc(info)
 
         return (
             f"✅ **Done!** Click the files below to download.{analysis}",
