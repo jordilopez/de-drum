@@ -62,10 +62,15 @@ de-drum/
 - **ESM** (`"type": "module"`)
 - **Fastify v5** with plugins: `@fastify/cors`, `@fastify/multipart`, `@fastify/rate-limit`
 - **Endpoints**:
+  - `POST /api/describe` — LLM section description (local, no backend)
   - `POST /api/separate/url` — forward to backend
   - `POST /api/separate/file` — multipart → backend
   - `GET /api/jobs/:id` — status proxy
   - `GET /api/jobs/:id/download/:filename` — stream file from backend
+- **Section describer** (`src/describer.js`): port of Python `section_describer.py`
+  - Calls DeepSeek via OpenRouter directly from the gateway
+  - Avoids round-trip to the Python backend for LLM enrichment
+  - Same signature: `describeSections(analysis)` → description string or null
 - **Error handling**: Return 502 if backend is unavailable
 
 ### Bash / Scripts

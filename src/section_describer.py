@@ -2,6 +2,12 @@
 
 Optional feature — only works if the ``OPENROUTER_API_KEY`` environment
 variable is set. If missing, all functions gracefully return ``None``.
+
+.. note::
+   A JavaScript port of this module lives at
+   ``services/gateway/src/describer.js``. The JS version is preferred
+   when using the API gateway, since it avoids a round-trip to the
+   Python backend. This Python version is kept for CLI/Gradio usage.
 """
 
 import json

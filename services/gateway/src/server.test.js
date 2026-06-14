@@ -4,11 +4,12 @@
  * Builds the Fastify app once (top-level await in ESM) and uses
  * ``inject()`` to simulate HTTP requests without opening a port.
  */
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import { describeSections } from "./describer.js";
 
 /**
  * Build a minimal gateway app with routes for testing.
@@ -44,6 +45,20 @@ async function buildApp() {
       return reply.status(422).send({ error: "File is required" });
     }
     return reply.status(200).send({ job_id: "mock-job-id-456" });
+  });
+
+  // Describe sections
+  app.post("/api/describe", async (request, reply) => {
+    const analysis = request.body;
+    if (!analysis?.sections?.length) {
+      return reply.status(422).send({ error: "Analysis data with sections[] is required" });
+    }
+    try {
+      const description = await describeSections(analysis);
+      return reply.send({ description, bpm: analysis.bpm, key: analysis.key });
+    } catch (err) {
+      return reply.status(502).send({ error: "LLM service unavailable", detail: err.message });
+    }
   });
 
   // Job status
@@ -136,5 +151,63 @@ describe("Gateway API", () => {
       headers: { "content-type": "text/plain" },
     });
     assert.equal(res.statusCode, 422);
+  });
+
+  // ── Describe endpoint ───────────────────────────────────────────
+
+  it("POST /api/describe rejects missing sections", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/describe",
+      payload: { bpm: 120, key: "C major" },
+    });
+    assert.equal(res.statusCode, 422);
+  });
+
+  it("POST /api/describe works with valid analysis", async () => {
+    const analysis = {
+      bpm: 120,
+      key: "C major",
+      duration_sec: 240,
+      sections: [
+        { loudness: 0.2, bands: [0.3, 0.2, 0.1, 0.4, 0.5, 0.3, 0.1] },
+        { loudness: 0.8, bands: [0.9, 0.7, 0.6, 0.8, 0.7, 0.5, 0.3] },
+      ],
+    };
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/describe",
+      payload: analysis,
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    // Without OPENROUTER_API_KEY → null; with key → a string
+    if (process.env.OPENROUTER_API_KEY) {
+      assert(typeof body.description === "string" && body.description.length > 0);
+    } else {
+      assert.equal(body.description, null);
+    }
+    assert.equal(body.bpm, 120);
+    assert.equal(body.key, "C major");
+  });
+
+  // ── Describer module unit tests ─────────────────────────────────
+
+  it("describeSections returns description or null depending on API key", async () => {
+    const result = await describeSections({
+      bpm: 128,
+      key: "A minor",
+      sections: [{ loudness: 0.5, bands: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] }],
+    });
+    if (process.env.OPENROUTER_API_KEY) {
+      assert(typeof result === "string" && result.length > 0);
+    } else {
+      assert.equal(result, null);
+    }
+  });
+
+  it("describeSections returns null for empty sections", async () => {
+    const result = await describeSections({ bpm: 120, sections: [] });
+    assert.equal(result, null);
   });
 });

@@ -68,6 +68,7 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - BACKEND_URL=http://backend:8000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
 
     depends_on:
       backend:

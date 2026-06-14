@@ -2,6 +2,7 @@
  * de-drum API Gateway — Fastify proxy between frontend and backend.
  *
  * Routes:
+ *   POST  /api/describe            →  local LLM (describer.js)
  *   POST  /api/separate/url        →  backend POST /backend/separate/url
  *   POST  /api/separate/file       →  backend POST /backend/separate/file
  *   GET   /api/jobs/:id             →  backend GET  /backend/jobs/:id
@@ -13,6 +14,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import { Readable } from "node:stream";
+import { describeSections } from "./describer.js";
 
 // ─── Config ────────────────────────────────────────────────────────
 
@@ -61,6 +63,42 @@ await app.register(rateLimit, {
  */
 app.get("/api/health", async (request, reply) => {
   return { status: "ok", service: "gateway" };
+});
+
+// ── Describe sections (LLM via OpenRouter) ─────────────────────────
+
+/**
+ * Analyse per-section energy data with DeepSeek and return a
+ * section-by-section description of the song structure.
+ *
+ * Accepts analysis data (the same dict returned by the backend's
+ * ``analyze()``) and calls OpenRouter via the local describer module.
+ * This avoids a round-trip to the Python backend for LLM enrichment.
+ *
+ * @param {Object} request.body - Analysis data with ``bpm``, ``key``,
+ *   ``duration_sec``, ``sections[]`` (each with ``loudness`` and
+ *   ``bands[7]``).
+ * @returns {{ description: string|null, key?: string, bpm?: number }}
+ * @throws {502} If the LLM call fails.
+ */
+app.post("/api/describe", async (request, reply) => {
+  const analysis = request.body;
+
+  if (!analysis?.sections?.length) {
+    return reply.status(422).send({ error: "Analysis data with sections[] is required" });
+  }
+
+  try {
+    const description = await describeSections(analysis);
+    return reply.send({
+      description,
+      bpm: analysis.bpm,
+      key: analysis.key,
+    });
+  } catch (err) {
+    request.log.error({ err }, "Section description failed");
+    return reply.status(502).send({ error: "LLM service unavailable", detail: err.message });
+  }
 });
 
 // ── Separate from URL ──────────────────────────────────────────────
