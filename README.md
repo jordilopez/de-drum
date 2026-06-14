@@ -118,6 +118,82 @@ are faster.
 
 ---
 
+## API Gateway + Backend (new architecture)
+
+Starting from Phase 6, de-drum has a **three-tier architecture** for production
+deployments:
+
+```
+[Frontend · Svelte/React/Vanilla]
+        ↕ HTTP (port 3000)
+[API Gateway · Fastify (Node.js)]    ←  proxy / orchestrator
+        ↕ HTTP (port 8000, internal)
+[Backend · FastAPI (Python)]         ←  runs Demucs + analysis
+```
+
+### Docker compose (new stack)
+
+```bash
+# Build images (first time only, ~10 min)
+npm run docker:build
+
+# Start gateway + backend
+npm run docker:up
+
+# View logs
+npm run docker:logs
+
+# Stop the stack
+npm run docker:down
+```
+
+The Gateway is exposed on **http://localhost:3000**.
+
+### API Endpoints
+
+| Method | Endpoint                                           | Description                        |
+| ------ | -------------------------------------------------- | ---------------------------------- |
+| `POST` | `/api/separate/url`                                | Submit YouTube URL for separation  |
+| `POST` | `/api/separate/file`                               | Upload audio file for separation   |
+| `GET`  | `/api/jobs/:id`                                    | Poll job status                    |
+| `GET`  | `/api/jobs/:id/download/:filename`                 | Download result file               |
+
+All endpoints return JSON. File uploads use **multipart/form-data** with fields
+`file` (the audio) and `model` (optional, default `htdemucs`).
+
+This lets you build any frontend (React, Svelte, vanilla JS, mobile app)
+that talks to the Gateway — the backend is completely decoupled.
+
+### Architecture diagram
+
+```
+You send a request ──▶  Gateway (port 3000)
+                          │
+                          ▼ (proxy)
+                      Backend (port 8000, internal)
+                          │
+                    ┌─────┴─────┐
+                    ▼           ▼
+                 yt-dlp      Demucs
+               (download)  (separation)
+                    │           │
+                    └─────┬─────┘
+                          ▼
+                     output/  ◀── results
+```
+
+### Local development (Node.js gateway)
+
+```bash
+# Install gateway deps
+npm run gateway:install
+
+# Run in dev mode (with auto-reload)
+npm run gateway:dev
+```
+
+---
+
 ## Usage
 
 ### Web UI (no terminal needed) 🌐
@@ -182,6 +258,8 @@ npm run check
 
 ## How it works
 
+### CLI / local mode
+
 ```
 YouTube URL / audio file
         │
@@ -195,6 +273,20 @@ YouTube URL / audio file
     └──────────────┘
 ```
 
+### Production mode (API Gateway)
+
+```
+[Frontend]  ──▶  [Gateway · Fastify]  ──▶  [Backend · FastAPI]
+      POST /api/separate           POST /backend/separate
+      GET  /api/jobs/:id            GET  /backend/jobs/:id
+           │                              │
+           └────── async job polling ─────┘
+```
+
+The Gateway handles routing, CORS, rate limiting, and file proxying.
+The Backend runs the actual Demucs separation in background threads,
+with per-job status tracking.
+
 [**Demucs**](https://github.com/facebookresearch/demucs) is a state-of-the-art deep learning model by Meta for music source separation. On Apple Silicon it runs on the GPU via **MPS**; on NVIDIA GPUs via **CUDA**.
 
 ---
@@ -203,21 +295,35 @@ YouTube URL / audio file
 
 ```
 de-drum/
-├── package.json        # npm scripts
+├── package.json              # npm scripts
 ├── scripts/
-│   ├── setup.mjs       # Cross-platform postinstall
-│   └── run.mjs         # Cross-platform Python runner
+│   ├── setup.mjs             # Cross-platform postinstall
+│   └── run.mjs               # Cross-platform Python runner
 ├── src/
-│   └── separate.py     # Main separation script
-├── .venv/              # Python virtual environment (auto-created)
-├── output/             # Results go here (gitignored)
-├── tests/              # CLI tests
+│   ├── separate.py           # Core separation (CLI)
+│   ├── analyze.py            # BPM, key, spectral map
+│   ├── section_describer.py  # LLM section descriptions
+│   └── ui.py                 # Gradio UI (legacy)
+├── services/
+│   ├── gateway/              # API Gateway (Node.js / Fastify)
+│   │   ├── package.json
+│   │   ├── src/
+│   │   │   └── server.js
+│   │   └── Dockerfile
+│   └── backend/              # Backend service (Python / FastAPI)
+│       └── main.py
+├── .venv/                    # Python venv (auto-created)
+├── output/                   # Results (gitignored)
+├── input/                    # Uploaded files (gitignored)
+├── tests/                    # CLI tests
 ├── .editorconfig
 ├── .prettierrc
-├── pyproject.toml       # Ruff + pytest config
+├── pyproject.toml             # Ruff + pytest config
 ├── requirements.txt
 ├── .gitignore
 ├── .nvmrc
+├── docker-compose.yml         # Backend + Gateway + UI services
+├── Dockerfile                 # Python image (shared)
 └── README.md
 ```
 

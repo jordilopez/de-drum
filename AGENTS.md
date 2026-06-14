@@ -19,21 +19,32 @@ Local drum track separation from audio using Demucs + yt-dlp.
 
 ```
 de-drum/
-├── README.md           # Main documentation
-├── AGENTS.md           # This file
-├── PLAN.md             # Roadmap and tasks
+├── README.md                 # Main documentation
+├── AGENTS.md                 # This file
+├── PLAN.md                   # Roadmap and tasks
 ├── .gitignore
-├── requirements.txt    # Python dependencies
-├── package.json        # npm scripts
-├── .venv/              # Virtual environment (not in git)
-├── src/
-│   └── separate.py     # Main separation script
-└── output/             # Results (not in git)
+├── requirements.txt          # Python dependencies
+├── package.json              # npm scripts
+├── .venv/                    # Virtual environment (not in git)
+├── src/                      # Core Python code (shared)
+│   ├── separate.py           # Separation + CLI
+│   ├── analyze.py            # BPM, key, spectral map
+│   ├── section_describer.py  # LLM section descriptions
+│   └── ui.py                 # Gradio UI (legacy)
+├── services/
+│   ├── gateway/              # API Gateway (Node.js / Fastify)
+│   │   ├── package.json
+│   │   ├── src/server.js
+│   │   └── Dockerfile
+│   └── backend/              # Backend service (Python / FastAPI)
+│       └── main.py
+├── output/                   # Results (not in git)
+└── input/                    # Uploaded files (not in git)
 ```
 
 ## Code conventions
 
-### Python (`src/separate.py`)
+### Python (`src/` and `services/backend/`)
 
 - **Shebang**: `#!/usr/bin/env python3`
 - **Typing**: Use type hints on all functions
@@ -41,6 +52,21 @@ de-drum/
 - **Errors**: Use `log` with `logging` or `rich` instead of `print`
 - **Line length**: 88 characters (Ruff-compatible)
 - **File handling**: Prefer `pathlib`
+- **Backend service** (`services/backend/main.py`): FastAPI app wrapping `src/`
+  - Never call `sys.exit()` inside the service — raise exceptions
+  - Background threads for async jobs
+  - Job status tracked in-memory (`_jobs` dict)
+
+### Node.js (`services/gateway/`)
+
+- **ESM** (`"type": "module"`)
+- **Fastify v5** with plugins: `@fastify/cors`, `@fastify/multipart`, `@fastify/rate-limit`
+- **Endpoints**:
+  - `POST /api/separate/url` — forward to backend
+  - `POST /api/separate/file` — multipart → backend
+  - `GET /api/jobs/:id` — status proxy
+  - `GET /api/jobs/:id/download/:filename` — stream file from backend
+- **Error handling**: Return 502 if backend is unavailable
 
 ### Bash / Scripts
 
@@ -73,11 +99,21 @@ prettier  # formatting for JSON, Markdown, YAML
 
 ## Data flow
 
+### CLI mode
+
 1. **Input**: YouTube URL or local audio file
 2. **Process**:
    - `yt-dlp` → temporary `.mp3`
    - `demucs` → `drums.wav` + `no_drums.wav`
 3. **Output**: `output/<song>/`
+
+### API Gateway mode
+
+1. **Frontend** sends request to **Gateway** (`POST /api/separate/url` or `/file`)
+2. **Gateway** forwards to **Backend** (`POST /backend/separate/url` or `/file`)
+3. **Backend** creates a job, returns `job_id`, starts background processing
+4. **Frontend** polls `GET /api/jobs/:id` for status (`pending → processing → done`)
+5. When done, **Frontend** downloads via `GET /api/jobs/:id/download/:filename`
 
 ## ⚠️ Critical rules
 
@@ -118,6 +154,22 @@ npm run test
 source .venv/bin/activate
 pip install -r requirements.txt
 python3 src/separate.py --check
+
+# Docker: start gateway + backend
+npm run docker:up
+
+# Docker: start just backend (FastAPI)
+npm run docker:backend
+
+# Docker: start just gateway (Fastify, needs backend running)
+npm run docker:gateway
+
+# Docker: legacy Gradio UI
+npm run docker:ui
+
+# Gateway local dev (Node.js, needs backend running)
+npm run gateway:install
+npm run gateway:dev
 ```
 
 ## Tooling
