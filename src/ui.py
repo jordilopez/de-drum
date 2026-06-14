@@ -60,18 +60,22 @@ def _fmt_section_desc(desc: str | None) -> str:
     """Format section description as Markdown, or return empty."""
     if not desc:
         return ""
-    lines = desc.strip().split("\n")
-    return "\n".join(f"> {line}" for line in lines)
+    desc = desc.strip()
+    if not desc:
+        return ""
+    # The LLM may return a header like "Here's the likely structure…" followed by
+    # blank line then the section lines, or just raw section lines.
+    # Add a consistent header so it's clear in the UI.
+    return f"💬 **Section description**\n\n{desc}"
 
 
 def process_url(url: str, model: str, keep_original: bool) -> tuple:
     """Process a YouTube URL.
 
-    Returns (status, button, drums, no_drums, spec_map, section_desc).
+    Returns (status, button, drums, no_drums, section_desc).
     """
     empty = (
         gr.update(interactive=True, value="🥁 Separate Drums"),
-        gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=False),
         "",
@@ -88,7 +92,6 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
         song_dir = OUTPUT_DIR / audio_path.stem
         info = _analyze(str(audio_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
-        spec_map = info.get("spectral_map")
         sec_desc = _fmt_section_desc(info.get("section_desc"))
 
         if keep_original:
@@ -102,7 +105,6 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
-            gr.update(visible=bool(spec_map), value=spec_map),
             sec_desc,
         )
     except Exception as e:
@@ -113,11 +115,10 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
 def process_file(file: Path, model: str) -> tuple:
     """Process a local audio file.
 
-    Returns (status, button, drums, no_drums, spec_map, section_desc).
+    Returns (status, button, drums, no_drums, section_desc).
     """
     empty = (
         gr.update(interactive=True, value="🥁 Separate Drums"),
-        gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=False),
         "",
@@ -132,7 +133,6 @@ def process_file(file: Path, model: str) -> tuple:
         song_dir = OUTPUT_DIR / file_path.stem
         info = _analyze(str(file_path), output_dir=str(song_dir))
         analysis = _format_analysis(info)
-        spec_map = info.get("spectral_map")
         sec_desc = _fmt_section_desc(info.get("section_desc"))
 
         return (
@@ -140,7 +140,6 @@ def process_file(file: Path, model: str) -> tuple:
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
-            gr.update(visible=bool(spec_map), value=spec_map),
             sec_desc,
         )
     except Exception as e:
@@ -184,8 +183,7 @@ with gr.Blocks(title="de-drum 🥁") as demo:
         with gr.Row():
             url_drums = gr.File(label="🥁 Drums", visible=False)
             url_no_drums = gr.File(label="🎵 No Drums", visible=False)
-        url_spec_map = gr.Image(label="📊 Spectral density map", visible=False)
-        url_section_desc = gr.Markdown(visible=False)
+        url_section_desc = gr.Markdown("")
 
     # ── Upload File tab ──────────────────────────────────────────────
 
@@ -204,8 +202,7 @@ with gr.Blocks(title="de-drum 🥁") as demo:
         with gr.Row():
             file_drums = gr.File(label="🥁 Drums", visible=False)
             file_no_drums = gr.File(label="🎵 No Drums", visible=False)
-        file_spec_map = gr.Image(label="📊 Spectral density map", visible=False)
-        file_section_desc = gr.Markdown(visible=False)
+        file_section_desc = gr.Markdown("")
 
     # ── Event wiring ─────────────────────────────────────────────────
 
@@ -216,37 +213,38 @@ with gr.Blocks(title="de-drum 🥁") as demo:
             url_status: "⏳ **Processing…** this may take a while.",
             url_drums: gr.update(visible=False),
             url_no_drums: gr.update(visible=False),
-            url_spec_map: gr.update(visible=False),
+            url_section_desc: "",
         }
 
     def _start_file_processing() -> dict:
+        """Disable the file-upload button and show a spinner status."""
         return {
             file_btn: gr.update(interactive=False, value="⏳ Processing..."),
             file_status: "⏳ **Processing…** this may take a while.",
             file_drums: gr.update(visible=False),
             file_no_drums: gr.update(visible=False),
-            file_spec_map: gr.update(visible=False),
+            file_section_desc: "",
         }
 
     # URL tab chain: start → process → done
     url_btn.click(
         fn=_start_processing,
-        outputs=[url_btn, url_status, url_drums, url_no_drums, url_spec_map, url_section_desc],
+        outputs=[url_btn, url_status, url_drums, url_no_drums, url_section_desc],
     ).then(
         fn=process_url,
         inputs=[url_input, url_model, url_keep],
-        outputs=[url_status, url_btn, url_drums, url_no_drums, url_spec_map, url_section_desc],
+        outputs=[url_status, url_btn, url_drums, url_no_drums, url_section_desc],
         api_name="separate_url",
     )
 
     # File tab chain
     file_btn.click(
         fn=_start_file_processing,
-        outputs=[file_btn, file_status, file_drums, file_no_drums, file_spec_map, file_section_desc],
+        outputs=[file_btn, file_status, file_drums, file_no_drums, file_section_desc],
     ).then(
         fn=process_file,
         inputs=[file_input, file_model],
-        outputs=[file_status, file_btn, file_drums, file_no_drums, file_spec_map, file_section_desc],
+        outputs=[file_status, file_btn, file_drums, file_no_drums, file_section_desc],
         api_name="separate_file",
     )
 

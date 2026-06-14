@@ -79,6 +79,12 @@ prettier  # formatting for JSON, Markdown, YAML
    - `demucs` → `drums.wav` + `no_drums.wav`
 3. **Output**: `output/<song>/`
 
+## ⚠️ Critical rules
+
+- **No auto-commits** — Never commit changes on my behalf. I decide when and what to commit.
+- **No auto-push** — Never push to remote. I handle pushes manually.
+- **No download tests** — Never run `npm run separate` or `yt-dlp` tests against real URLs. I test through the Gradio UI myself.
+
 ## Notes for agents
 
 - **Do not commit** large or binary files to the repository
