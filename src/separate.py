@@ -15,6 +15,8 @@ import torch
 from rich.console import Console
 from rich.logging import RichHandler
 
+from analyze import analyze as _analyze
+
 # Suppress noisy TorchCodec warnings about encoding/bits_per_sample
 warnings.filterwarnings("ignore", message=".*not fully supported by TorchCodec.*")
 warnings.filterwarnings("ignore", message=".*not directly supported by TorchCodec.*")
@@ -231,18 +233,26 @@ def separate(source: str, output_dir: str, model: str = "htdemucs") -> None:
             )
             wav.unlink()  # remove the original WAV
 
+    # Analyse original audio (BPM + key)
+    analysis = _analyze(str(source_path.resolve()))
+
+    # Show analysis
+    bpm_str = f"{analysis['bpm']} BPM" if analysis["bpm"] else "—"
+    key_str = analysis["key"] if analysis["key"] else "—"
+    console.print(f"\n🎵 [bold]Analysis:[/bold]  Tempo [cyan]{bpm_str}[/cyan]  ·  Key [magenta]{key_str}[/magenta]")
+
     # List output
     if final_out.exists():
         files = list(final_out.iterdir())
         console.print(
-            f"\n[green]✓[/green] Done — [bold]{len(files)}[/bold] file(s) in [bold]{final_out}[/bold]:"
+            f"[green]✓[/green] [bold]{len(files)}[/bold] file(s) in [bold]{final_out}[/bold]:"
         )
         for f in sorted(files):
             size = f.stat().st_size / 1024 / 1024
             console.print(f"  [bold]{f.name}[/bold] ({size:.1f} MB)")
     else:
         console.print(
-            f"\n[green]✓[/green] Separation complete — check [bold]{output_dir}[/bold]"
+            f"[green]✓[/green] Separation complete — check [bold]{output_dir}[/bold]"
         )
     console.print()
 

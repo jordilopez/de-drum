@@ -12,6 +12,7 @@ import gradio as gr
 # Import core logic from the CLI module
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from separate import download_audio, separate as _separate  # noqa: E402
+from analyze import analyze as _analyze  # noqa: E402
 
 # Suppress noisy TorchCodec warnings
 warnings.filterwarnings("ignore", message=".*not fully supported by TorchCodec.*")
@@ -38,6 +39,18 @@ def _as_file_update(path: str) -> dict:
     return gr.update(visible=bool(path), value=path if path else None)
 
 
+def _format_analysis(info: dict) -> str:
+    """Format BPM and key analysis into a Markdown string."""
+    parts = []
+    if info.get("bpm"):
+        parts.append(f"🎵 {info['bpm']} BPM")
+    if info.get("key"):
+        parts.append(f"🎹 {info['key']}")
+    if parts:
+        return "\n\n" + " · ".join(parts)
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Processing functions
 # ---------------------------------------------------------------------------
@@ -58,6 +71,10 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
 
         drums_path, no_drums_path = _get_output_files(audio_path.stem)
 
+        # Analyse before cleanup (audio file is in tmp_dir)
+        info = _analyze(str(audio_path))
+        analysis = _format_analysis(info)
+
         if keep_original:
             song_dir = OUTPUT_DIR / audio_path.stem
             song_dir.mkdir(parents=True, exist_ok=True)
@@ -65,8 +82,9 @@ def process_url(url: str, model: str, keep_original: bool) -> tuple:
             shutil.move(str(audio_path), str(dst))
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
         return (
-            "✅ **Done!** Click the files below to download.",
+            f"✅ **Done!** Click the files below to download.{analysis}",
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
@@ -94,8 +112,12 @@ def process_file(file: Path, model: str) -> tuple:
         _separate(str(file_path), str(OUTPUT_DIR), model)
         drums_path, no_drums_path = _get_output_files(file_path.stem)
 
+        # Analyse
+        info = _analyze(str(file_path))
+        analysis = _format_analysis(info)
+
         return (
-            "✅ **Done!** Click the files below to download.",
+            f"✅ **Done!** Click the files below to download.{analysis}",
             gr.update(interactive=True, value="🥁 Separate Drums"),
             _as_file_update(drums_path),
             _as_file_update(no_drums_path),
