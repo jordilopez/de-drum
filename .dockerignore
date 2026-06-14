@@ -6,6 +6,7 @@ __pycache__/
 
 # Output / data
 output/
+input/
 
 # Model cache (mount as volume)
 cache/

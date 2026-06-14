@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY src/ src/
+COPY services/ services/
 COPY pyproject.toml .
 
 # Optional: OpenRouter API key (mount at runtime via -e or .env)
@@ -51,4 +52,5 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/healthz')" || exit 1
 
+# Default: launch the Gradio UI (override with command in docker-compose)
 ENTRYPOINT ["python3", "src/ui.py"]

@@ -28,6 +28,9 @@ PLAN.md
 # Environment
 .env
 
+# Services
+input/
+
 # Node
 node_modules/
 
