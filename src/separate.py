@@ -53,14 +53,14 @@ def check_environment() -> bool:
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
         console.print("[green]✓[/green] ffmpeg found")
-    except FileNotFoundError, subprocess.CalledProcessError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         console.print("[red]✗[/red] ffmpeg not found — required for audio conversion")
         ok = False
 
     try:
         subprocess.run(["yt-dlp", "--version"], capture_output=True, check=True)
         console.print("[green]✓[/green] yt-dlp found")
-    except FileNotFoundError, subprocess.CalledProcessError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         console.print("[yellow]⚠[/yellow] yt-dlp not found — YouTube URLs won't work")
 
     return ok

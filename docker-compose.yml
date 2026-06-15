@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
 
     # Override entrypoint to run the FastAPI backend
-    command:
+    entrypoint:
       - python3
       - -m
       - uvicorn
