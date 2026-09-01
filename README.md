@@ -37,7 +37,51 @@ unavailable and that CPU processing will be used.
 
 ## Installation
 
-### macOS (Apple Silicon) — recommended 🍎
+## Installation
+
+### Quick install (recommended)
+
+```bash
+# 1. Install system dependencies (if you don't have them)
+brew install ffmpeg yt-dlp
+
+# 2. Install de-drum (creates .venv/, installs Python deps)
+npm install
+
+# 3. Verify GPU acceleration
+npm run check
+```
+
+You should see:
+
+```
+PyTorch 2.x.x
+✓ MPS (Metal GPU) is available
+✓ PyTorch built with MPS support
+✓ ffmpeg found
+✓ yt-dlp found
+```
+
+### Interactive installer
+
+For a guided setup that checks versions and prompts before installing:
+
+```bash
+npm run install:interactive
+```
+
+Or run directly:
+
+```bash
+python3 scripts/install.py
+```
+
+Options:
+- `--yes` / `-y` — assume yes to all prompts
+- `--skip-system` — skip system dependency installation
+- `--skip-venv` — skip venv creation (use existing)
+
+`npm install` automatically creates a Python virtual environment (`.venv/`) and installs all dependencies — no manual `pip` steps needed.
 
 ```bash
 # 1. Install system dependencies (if you don't have them)

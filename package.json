@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "postinstall": "node scripts/setup.mjs",
+    "install:interactive": "python3 scripts/install.py",
     "dedrum": "node scripts/run.mjs src/separate.py",
     "check": "node scripts/run.mjs src/separate.py --check",
     "test": "node scripts/run.mjs -m pytest",
