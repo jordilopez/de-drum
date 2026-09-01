@@ -18,6 +18,21 @@ de-drum downloads a video from YouTube with `yt-dlp`, separates the drum track f
 | **yt-dlp**  | Required for YouTube downloads |
 | **RAM**     | ~8 GB free for long songs      |
 
+### 2018 MacBook Pro and other Intel Macs
+
+This project should also run on a 2018 Intel MacBook Pro, provided that the
+required Python, Node.js, `ffmpeg`, and `yt-dlp` versions can be installed on
+the Mac's version of macOS. However, Intel Macs cannot use PyTorch's MPS
+(Metal) acceleration. Demucs will therefore fall back to the CPU, which can be
+considerably slower than running on Apple Silicon.
+
+For a more reliable experience, use a model with **16 GB of RAM or more**, keep
+it connected to power, and close other memory-intensive applications. An 8 GB
+Mac may work for shorter files but can become slow or run out of memory when
+processing longer songs. Run `npm run check` after installation to confirm
+that the environment is ready; an Intel Mac is expected to report that MPS is
+unavailable and that CPU processing will be used.
+
 ---
 
 ## Installation
@@ -139,6 +154,33 @@ de-drum/
 ```
 
 ---
+
+## Experimental status
+
+This project is an experiment in running local drum separation with Demucs. It
+is provided as-is, without guarantees about separation quality, performance,
+compatibility, or uninterrupted operation. It is not affiliated with Demucs,
+YouTube, or any other service used by the project.
+
+## Legal and responsible use
+
+This project uses [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) to retrieve media
+from third-party platforms. It is intended for content that you own or are
+authorized to download and process. Before downloading anything, make sure
+your use complies with applicable copyright law, the rights holder's
+permissions, and the terms of service of the source platform. Do not use this
+project to infringe copyright or bypass access controls.
+
+The upstream software licenses cover the software, not the media it retrieves
+or the outputs it creates: [`yt-dlp` is released under the Unlicense](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE),
+while [Demucs is released under the MIT license](https://github.com/facebookresearch/demucs/blob/main/LICENSE).
+Neither license grants permission to download or redistribute copyrighted
+media.
+
+This project does not grant permission to download any content, and this
+notice cannot make an otherwise unlawful download lawful. You are solely
+responsible for how you use the software and for any content you download or
+create with it. This is a general project notice, not legal advice.
 
 ## Notes
 
