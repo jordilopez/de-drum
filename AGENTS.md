@@ -25,26 +25,20 @@ de-drum/
 ├── .gitignore
 ├── requirements.txt          # Python dependencies
 ├── package.json              # npm scripts
+├── scripts/
+│   ├── run.mjs               # npm runner (runs Python inside .venv)
+│   └── setup.mjs             # venv + dependency setup (npm install)
 ├── .venv/                    # Virtual environment (not in git)
-├── src/                      # Core Python code (shared)
-│   ├── separate.py           # Separation + CLI
-│   ├── analyze.py            # BPM, key, spectral map
-│   ├── section_describer.py  # LLM section descriptions
-│   └── ui.py                 # Gradio UI (legacy)
-├── services/
-│   ├── gateway/              # API Gateway (Node.js / Fastify)
-│   │   ├── package.json
-│   │   ├── src/server.js
-│   │   └── Dockerfile
-│   └── backend/              # Backend service (Python / FastAPI)
-│       └── main.py
+├── src/                      # Core Python code
+│   └── separate.py           # Download + separation + CLI
+├── tests/                    # pytest tests
 ├── output/                   # Results (not in git)
-└── input/                    # Uploaded files (not in git)
+└── input/                    # Input files (not in git)
 ```
 
 ## Code conventions
 
-### Python (`src/` and `services/backend/`)
+### Python (`src/`)
 
 - **Shebang**: `#!/usr/bin/env python3`
 - **Typing**: Use type hints on all functions
@@ -52,26 +46,7 @@ de-drum/
 - **Errors**: Use `log` with `logging` or `rich` instead of `print`
 - **Line length**: 88 characters (Ruff-compatible)
 - **File handling**: Prefer `pathlib`
-- **Backend service** (`services/backend/main.py`): FastAPI app wrapping `src/`
-  - Never call `sys.exit()` inside the service — raise exceptions
-  - Background threads for async jobs
-  - Job status tracked in-memory (`_jobs` dict)
-
-### Node.js (`services/gateway/`)
-
-- **ESM** (`"type": "module"`)
-- **Fastify v5** with plugins: `@fastify/cors`, `@fastify/multipart`, `@fastify/rate-limit`
-- **Endpoints**:
-  - `POST /api/describe` — LLM section description (local, no backend)
-  - `POST /api/separate/url` — forward to backend
-  - `POST /api/separate/file` — multipart → backend
-  - `GET /api/jobs/:id` — status proxy
-  - `GET /api/jobs/:id/download/:filename` — stream file from backend
-- **Section describer** (`src/describer.js`): port of Python `section_describer.py`
-  - Calls DeepSeek via OpenRouter directly from the gateway
-  - Avoids round-trip to the Python backend for LLM enrichment
-  - Same signature: `describeSections(analysis)` → description string or null
-- **Error handling**: Return 502 if backend is unavailable
+- **CLI**: Never call `sys.exit()` outside CLI entry points
 
 ### Bash / Scripts
 
@@ -85,7 +60,6 @@ de-drum/
 torch>=2.4.0
 demucs>=4.0.0
 torchcodec>=0.14.0
-ffmpeg-python>=0.2.0
 rich>=13.0.0
 ruff>=0.11.0    # linter + formatter
 pytest>=8.0.0   # tests
@@ -104,27 +78,18 @@ prettier  # formatting for JSON, Markdown, YAML
 
 ## Data flow
 
-### CLI mode
-
 1. **Input**: YouTube URL or local audio file
 2. **Process**:
-   - `yt-dlp` → temporary `.mp3`
-   - `demucs` → `drums.wav` + `no_drums.wav`
+   - `yt-dlp` → temporary `.mp3` (for URLs)
+   - `demucs --two-stems drums` → `drums.wav` + `no_drums.wav` (MPS if available)
+   - `ffmpeg` → WAV converted to MP3 with `<song>_<stem>.mp3` naming
 3. **Output**: `output/<song>/`
-
-### API Gateway mode
-
-1. **Frontend** sends request to **Gateway** (`POST /api/separate/url` or `/file`)
-2. **Gateway** forwards to **Backend** (`POST /backend/separate/url` or `/file`)
-3. **Backend** creates a job, returns `job_id`, starts background processing
-4. **Frontend** polls `GET /api/jobs/:id` for status (`pending → processing → done`)
-5. When done, **Frontend** downloads via `GET /api/jobs/:id/download/:filename`
 
 ## ⚠️ Critical rules
 
 - **No auto-commits** — Never commit changes on my behalf. I decide when and what to commit.
 - **No auto-push** — Never push to remote. I handle pushes manually.
-- **No download tests** — Never run `npm run separate` or `yt-dlp` tests against real URLs. I test through the Gradio UI myself.
+- **No download tests** — Never run separation against real URLs. I test it myself.
 
 ## Notes for agents
 
@@ -141,7 +106,8 @@ prettier  # formatting for JSON, Markdown, YAML
 npm install
 
 # Run separation
-npm run separate -- "https://youtube.com/watch?v=..."
+npm run dedrum -- "https://youtube.com/watch?v=..."
+npm run dedrum -- path/to/song.mp3
 
 # Check GPU
 npm run check
@@ -159,22 +125,6 @@ npm run test
 source .venv/bin/activate
 pip install -r requirements.txt
 python3 src/separate.py --check
-
-# Docker: start gateway + backend
-npm run docker:up
-
-# Docker: start just backend (FastAPI)
-npm run docker:backend
-
-# Docker: start just gateway (Fastify, needs backend running)
-npm run docker:gateway
-
-# Docker: legacy Gradio UI
-npm run docker:ui
-
-# Gateway local dev (Node.js, needs backend running)
-npm run gateway:install
-npm run gateway:dev
 ```
 
 ## Tooling

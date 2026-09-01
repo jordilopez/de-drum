@@ -2,7 +2,7 @@
 
 **Separate drums from any song — 100% local, zero cost.**
 
-de-drum downloads audio from YouTube with `yt-dlp` and separates the drum track using **Demucs** with GPU acceleration.
+de-drum downloads a video from YouTube with `yt-dlp`, separates the drum track from the audio using **Demucs** with GPU acceleration (MPS on Apple Silicon), and muxes everything back into a de-drummed MP4.
 
 > Everything runs on your machine — no external APIs, no subscriptions, no cloud costs.
 
@@ -12,8 +12,8 @@ de-drum downloads audio from YouTube with `yt-dlp` and separates the drum track 
 
 |             | Minimum                        |
 | ----------- | ------------------------------ |
-| **Python**  | 3.10+                          |
-| **Node.js** | 20+                            |
+| **Python**  | 3.14+                          |
+| **Node.js** | 24+                            |
 | **ffmpeg**  | Required for audio conversion  |
 | **yt-dlp**  | Required for YouTube downloads |
 | **RAM**     | ~8 GB free for long songs      |
@@ -38,299 +38,110 @@ npm run check
 You should see:
 
 ```
-PyTorch 2.12.0
+PyTorch 2.x.x
 ✓ MPS (Metal GPU) is available
 ✓ PyTorch built with MPS support
 ✓ ffmpeg found
 ✓ yt-dlp found
 ```
 
-### Linux 🐧
-
-```bash
-# 1. Install system dependencies
-# Debian/Ubuntu:
-sudo apt install ffmpeg yt-dlp python3 python3-venv
-
-# Fedora:
-sudo dnf install ffmpeg yt-dlp python3
-
-# Arch:
-sudo pacman -S ffmpeg yt-dlp python
-
-# 2. Install de-drum
-npm install
-
-# 3. Verify the setup
-npm run check
-```
-
-> **GPU acceleration**: Demucs will use CUDA if an NVIDIA GPU with PyTorch CUDA is available, otherwise it falls back to CPU.
-
-### Windows 🪟
-
-```powershell
-# 1. Install system dependencies (using winget)
-winget install ffmpeg
-winget install yt-dlp
-winget install Python.Python.3.14
-
-# Or using Chocolatey:
-# choco install ffmpeg yt-dlp python
-
-# 2. Install de-drum
-npm install
-
-# 3. Verify the setup
-npm run check
-```
-
-> **GPU acceleration**: On Windows, Demucs will use CUDA if available, otherwise CPU. No MPS support (Apple only).
-
----
-
-## Docker 🐳
-
-> **Note**: Inside Docker, Apple Silicon MPS acceleration is **not available**.
-> For GPU acceleration on Linux, install the
-> [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-> and uncomment the GPU section in `docker-compose.yml`.
-
-```bash
-# Build the image (first time only, takes ~10 min)
-npm run docker:build
-
-# Start the UI at http://localhost:7860
-npm run docker:ui
-
-# View logs
-npm run docker:logs
-
-# Run separation from the command line
-npm run docker:separate -- "https://youtube.com/watch?v=..."
-
-# Stop the container
-npm run docker:stop
-```
-
-The model cache (~2 GB) is persisted in a Docker volume, so subsequent runs
-are faster.
-
----
-
-## API Gateway + Backend (new architecture)
-
-Starting from Phase 6, de-drum has a **three-tier architecture** for production
-deployments:
-
-```
-[Frontend · Svelte/React/Vanilla]
-        ↕ HTTP (port 3000)
-[API Gateway · Fastify (Node.js)]    ←  proxy / orchestrator
-        ↕ HTTP (port 8000, internal)
-[Backend · FastAPI (Python)]         ←  runs Demucs + analysis
-```
-
-### Docker compose (new stack)
-
-```bash
-# Build images (first time only, ~10 min)
-npm run docker:build
-
-# Start gateway + backend
-npm run docker:up
-
-# View logs
-npm run docker:logs
-
-# Stop the stack
-npm run docker:down
-```
-
-The Gateway is exposed on **http://localhost:3000**.
-
-### API Endpoints
-
-| Method | Endpoint                                           | Description                        |
-| ------ | -------------------------------------------------- | ---------------------------------- |
-| `POST` | `/api/separate/url`                                | Submit YouTube URL for separation  |
-| `POST` | `/api/separate/file`                               | Upload audio file for separation   |
-| `GET`  | `/api/jobs/:id`                                    | Poll job status                    |
-| `GET`  | `/api/jobs/:id/download/:filename`                 | Download result file               |
-
-All endpoints return JSON. File uploads use **multipart/form-data** with fields
-`file` (the audio) and `model` (optional, default `htdemucs`).
-
-This lets you build any frontend (React, Svelte, vanilla JS, mobile app)
-that talks to the Gateway — the backend is completely decoupled.
-
-### Architecture diagram
-
-```
-You send a request ──▶  Gateway (port 3000)
-                          │
-                          ▼ (proxy)
-                      Backend (port 8000, internal)
-                          │
-                    ┌─────┴─────┐
-                    ▼           ▼
-                 yt-dlp      Demucs
-               (download)  (separation)
-                    │           │
-                    └─────┬─────┘
-                          ▼
-                     output/  ◀── results
-```
-
-### Local development (Node.js gateway)
-
-```bash
-# Install gateway deps
-npm run gateway:install
-
-# Run in dev mode (with auto-reload)
-npm run gateway:dev
-```
+`npm install` automatically creates a Python virtual environment (`.venv/`) and installs all dependencies — no manual `pip` steps needed.
 
 ---
 
 ## Usage
 
-### Web UI (no terminal needed) 🌐
+### From a YouTube URL (video workflow)
+
+Downloads the video, removes the drums from the audio, and muxes the result into a de-drummed MP4:
 
 ```bash
-npm run ui
-```
-
-Opens a browser interface at [http://127.0.0.1:7860](http://127.0.0.1:7860):
-
-- Paste a YouTube URL or upload a local audio file
-- Choose the Demucs model
-- Download the separated MP3 files directly
-
-### From a YouTube link
-
-```bash
-npm run separate -- "https://youtube.com/watch?v=..."
+npm run dedrum -- "https://youtube.com/watch?v=..."
 ```
 
 ### From a local audio file
 
+Separates the stems without muxing (no video involved):
+
 ```bash
-npm run separate -- path/to/audio.mp3
-```
-
-### Output
-
-```
-output/
-└── <song-name>/
-    ├── <song-name>_drums.mp3       🥁 Drums only
-    └── <song-name>_no_drums.mp3    🎵 Everything else
+npm run dedrum -- path/to/song.mp3
 ```
 
 ### Options
 
-| Option            | Description                                                                     |
-| ----------------- | ------------------------------------------------------------------------------- |
-| `--model`         | Demucs model: `htdemucs` (default), `htdemucs_ft`, `htdemucs_6s`, `hdemucs_mmi` |
-| `--output`        | Output directory (default: `output/`)                                           |
-| `--keep-original` | Keep the original YouTube audio file                                            |
-| `--check`         | Verify the environment only                                                     |
-
-Examples:
-
 ```bash
-# Use a more accurate model
-npm run separate -- "https://..." --model htdemucs_ft
+npm run dedrum -- --help
+```
 
-# Save to a custom directory
-npm run separate -- "https://..." --output ~/Desktop
+| Flag             | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| `--model <name>` | Demucs model: `htdemucs` (default), `htdemucs_ft`, ... |
+| `--output <dir>` | Output directory (default: `output/`)                  |
+| `--check`        | Verify the environment and exit                        |
+| `-v, --verbose`  | Show debug logs                                        |
 
-# Keep the downloaded mp3
-npm run separate -- "https://..." --keep-original
+### Output
 
-# Check environment
-npm run check
+For YouTube URLs, the final de-drummed video is saved as `output/<title>_no_drums.mp4`:
+
+```
+output/
+└── Bohemian Rhapsody_no_drums.mp4
+```
+
+For local audio files, the stems are saved to `output/<song>/`:
+
+```
+output/
+└── Bohemian Rhapsody/
+    ├── Bohemian Rhapsody_drums.mp3
+    └── Bohemian Rhapsody_no_drums.mp3
 ```
 
 ---
 
 ## How it works
 
-### CLI / local mode
-
-```
-YouTube URL / audio file
-        │
-        ▼ [yt-dlp]
-      MP3
-        │
-        ▼ [Demucs — GPU accelerated]
-    ┌──────────────┐
-    │  _drums.mp3  │
-    │ _no_drums.mp3│
-    └──────────────┘
-```
-
-### Production mode (API Gateway)
-
-```
-[Frontend]  ──▶  [Gateway · Fastify]  ──▶  [Backend · FastAPI]
-      POST /api/separate           POST /backend/separate
-      GET  /api/jobs/:id            GET  /backend/jobs/:id
-           │                              │
-           └────── async job polling ─────┘
-```
-
-The Gateway handles routing, CORS, rate limiting, and file proxying.
-The Backend runs the actual Demucs separation in background threads,
-with per-job status tracking.
-
-[**Demucs**](https://github.com/facebookresearch/demucs) is a state-of-the-art deep learning model by Meta for music source separation. On Apple Silicon it runs on the GPU via **MPS**; on NVIDIA GPUs via **CUDA**.
+1. **Input**: a YouTube URL (video workflow) or a local audio file
+2. **Download** (URL only): `yt-dlp` fetches the video-only stream (MP4) and the audio (MP3) into temporary directories
+3. **Separation**: Demucs (`htdemucs`) splits the audio into `drums` and `no_drums` stems, using the Metal GPU (MPS) when available
+4. **Muxing**: `ffmpeg` copies the original video stream and combines it with the `no_drums` audio (AAC) into `<title>_no_drums.mp4`
+5. **Output**: `output/<title>_no_drums.mp4` — temporary files are cleaned up automatically
 
 ---
 
-## Project structure
+## Development
+
+```bash
+npm run check   # verify PyTorch / MPS / ffmpeg / yt-dlp
+npm run test    # run pytest
+npm run lint    # ruff check
+npm run format  # ruff format + prettier
+```
+
+### Project structure
 
 ```
 de-drum/
-├── package.json              # npm scripts
+├── README.md          # This file
+├── AGENTS.md          # Instructions for AI agents
+├── PLAN.md            # Roadmap
+├── requirements.txt   # Python dependencies
+├── package.json       # npm scripts
 ├── scripts/
-│   ├── setup.mjs             # Cross-platform postinstall
-│   └── run.mjs               # Cross-platform Python runner
+│   ├── run.mjs        # npm runner (runs Python inside .venv)
+│   └── setup.mjs      # venv + dependency setup
 ├── src/
-│   ├── separate.py           # Core separation (CLI)
-│   ├── analyze.py            # BPM, key, spectral map
-│   ├── section_describer.py  # LLM section descriptions
-│   └── ui.py                 # Gradio UI (legacy)
-├── services/
-│   ├── gateway/              # API Gateway (Node.js / Fastify)
-│   │   ├── package.json
-│   │   ├── src/
-│   │   │   └── server.js
-│   │   └── Dockerfile
-│   └── backend/              # Backend service (Python / FastAPI)
-│       └── main.py
-├── .venv/                    # Python venv (auto-created)
-├── output/                   # Results (gitignored)
-├── input/                    # Uploaded files (gitignored)
-├── tests/                    # CLI tests
-├── .editorconfig
-├── .prettierrc
-├── pyproject.toml             # Ruff + pytest config
-├── requirements.txt
-├── .gitignore
-├── .nvmrc
-├── docker-compose.yml         # Backend + Gateway + UI services
-├── Dockerfile                 # Python image (shared)
-└── README.md
+│   └── separate.py    # Download + separation + CLI
+├── tests/             # pytest tests
+├── output/            # Results (gitignored)
+└── input/             # Input files (gitignored)
 ```
 
 ---
 
-## Links
+## Notes
 
-- [Demucs (Meta)](https://github.com/facebookresearch/demucs)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- [PyTorch MPS](https://pytorch.org/docs/stable/notes/mps.html)
+- The first run downloads the ~2 GB `htdemucs` model into memory — make sure enough RAM is free.
+- MPS (Metal GPU) is the main acceleration path on Apple Silicon; on machines without MPS, Demucs falls back to CPU (slower).
+- `output/` and `input/` are gitignored.

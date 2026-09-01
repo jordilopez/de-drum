@@ -5,23 +5,11 @@
   "main": "index.js",
   "scripts": {
     "postinstall": "node scripts/setup.mjs",
-    "separate": "node scripts/run.mjs src/separate.py",
+    "dedrum": "node scripts/run.mjs src/separate.py",
     "check": "node scripts/run.mjs src/separate.py --check",
     "test": "node scripts/run.mjs -m pytest",
-    "lint": "node scripts/run.mjs -m ruff check src/ tests/ services/backend/",
-    "format": "node scripts/run.mjs -m ruff format src/ tests/ services/backend/ && npx prettier --write .",
-    "ui": "node scripts/run.mjs src/ui.py",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d gateway backend && echo '→ Gateway at http://localhost:3000'",
-    "docker:logs": "docker compose logs -f",
-    "docker:down": "docker compose down gateway backend",
-    "docker:gateway": "docker compose up -d gateway",
-    "docker:backend": "docker compose up -d backend",
-    "docker:separate": "docker compose run --rm de-drum python3 src/separate.py",
-    "docker:ui": "docker compose --profile legacy up -d de-drum && echo '→ http://localhost:7860'",
-    "gateway:install": "cd services/gateway && npm install",
-    "gateway:dev": "cd services/gateway && npm run dev",
-    "gateway:test": "cd services/gateway && node --test src/server.test.js"
+    "lint": "node scripts/run.mjs -m ruff check src/ tests/",
+    "format": "node scripts/run.mjs -m ruff format src/ tests/ && npx prettier --write ."
   },
   "devDependencies": {
     "prettier": "^3.4.0"
