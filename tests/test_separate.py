@@ -317,9 +317,12 @@ def test_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
     def fake_separate(source, out, model, convert_mp3=False):
         calls.append("separate")
         assert convert_mp3 is False
-        wav = Path(out) / "no_drums.wav"
-        wav.write_bytes(b"w")
-        return wav
+        out = Path(out)
+        stem_dir = out / Path(source).stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "no_drums.wav").write_bytes(b"w")
+        (stem_dir / "drums.wav").write_bytes(b"w")
+        return stem_dir / "no_drums.wav"
 
     mux_args = {}
 
@@ -327,6 +330,11 @@ def test_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
         calls.append("mux")
         mux_args.update(video=video, audio=audio, output=output)
         output.write_bytes(b"final")
+
+    def fake_ffmpeg(cmd, label):
+        Path(cmd[-1]).write_bytes(b"mp3")
+
+    monkeypatch.setattr(sep, "_run_command", fake_ffmpeg)
 
     monkeypatch.setattr(sep, "download_video", fake_download_video)
     monkeypatch.setattr(sep, "download_audio", fake_download_audio)
@@ -341,6 +349,86 @@ def test_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
     assert result.exists()
     assert mux_args["video"] == fake_file
     assert mux_args["audio"].name == "no_drums.wav"
+
+
+def test_workflow_keeps_isolated_drums(monkeypatch, tmp_path) -> None:
+    """The workflow must keep the drums stem as <title>_drums.mp3 in output."""
+    monkeypatch.setattr(sep, "check_environment", lambda: True)
+
+    video = tmp_path / "Song.mp4"
+    video.write_bytes(b"v")
+    monkeypatch.setattr(sep, "download_video", lambda url, d: video)
+    monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
+
+    def fake_separate(source, out, model, convert_mp3=False):
+        out = Path(out)
+        stem_dir = out / Path(source).stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "no_drums.wav").write_bytes(b"w")
+        (stem_dir / "drums.wav").write_bytes(b"w")
+        return stem_dir / "no_drums.wav"
+
+    monkeypatch.setattr(sep, "separate", fake_separate)
+    monkeypatch.setattr(sep, "mux_video_audio", lambda v, a, o: o.write_bytes(b"final"))
+
+    def fake_ffmpeg(cmd, label):
+        Path(cmd[-1]).write_bytes(b"mp3")
+
+    monkeypatch.setattr(sep, "_run_command", fake_ffmpeg)
+
+    out_dir = tmp_path / "output"
+    sep.run_dedrum_workflow("https://youtu.be/abc", str(out_dir))
+
+    drums_mp3 = out_dir / "Song_drums.mp3"
+    assert drums_mp3.exists() and drums_mp3.stat().st_size > 0
+
+
+def test_workflow_drums_wav_format(monkeypatch, tmp_path) -> None:
+    """With drums_format=wav the Demucs WAV is copied as-is, no re-encoding."""
+    monkeypatch.setattr(sep, "check_environment", lambda: True)
+
+    video = tmp_path / "Song.mp4"
+    video.write_bytes(b"v")
+    monkeypatch.setattr(sep, "download_video", lambda url, d: video)
+    monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
+
+    def fake_separate(source, out, model, convert_mp3=False):
+        out = Path(out)
+        stem_dir = out / Path(source).stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "no_drums.wav").write_bytes(b"w")
+        (stem_dir / "drums.wav").write_bytes(b"raw wav data")
+        return stem_dir / "no_drums.wav"
+
+    monkeypatch.setattr(sep, "separate", fake_separate)
+    monkeypatch.setattr(sep, "mux_video_audio", lambda v, a, o: o.write_bytes(b"f"))
+
+    ffmpeg_calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        ffmpeg_calls.append(list(cmd))
+        return SimpleNamespace(stdout="", returncode=0)
+
+    monkeypatch.setattr(sep.subprocess, "run", fake_run)
+
+    out_dir = tmp_path / "output"
+    sep.run_dedrum_workflow("https://youtu.be/abc", str(out_dir), drums_format="wav")
+
+    drums_wav = out_dir / "Song_drums.wav"
+    assert drums_wav.exists()
+    assert drums_wav.read_bytes() == b"raw wav data"
+    assert not (out_dir / "Song_drums.mp3").exists()
+    assert ffmpeg_calls == []  # no ffmpeg conversion ran
+
+
+def test_workflow_invalid_drums_format(monkeypatch, tmp_path) -> None:
+    """A drums_format other than mp3/wav must be rejected up front."""
+    monkeypatch.setattr(sep, "check_environment", lambda: True)
+
+    with pytest.raises(ValueError, match="drums_format"):
+        sep.run_dedrum_workflow(
+            "https://youtu.be/abc", str(tmp_path / "out"), drums_format="MP3"
+        )
 
 
 def test_workflow_cleanup_on_success(monkeypatch, tmp_path, fake_file) -> None:
@@ -366,11 +454,14 @@ def test_workflow_cleanup_on_success(monkeypatch, tmp_path, fake_file) -> None:
     monkeypatch.setattr(sep, "download_audio", fake_download_audio)
 
     def fake_separate(source, out, model, convert_mp3=False):
-        Path(out).mkdir(parents=True, exist_ok=True)
-        created_dirs.append(Path(out))
-        wav = Path(out) / "no_drums.wav"
-        wav.write_bytes(b"w")
-        return wav
+        out = Path(out)
+        out.mkdir(parents=True, exist_ok=True)
+        created_dirs.append(out)
+        stem_dir = out / Path(source).stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "no_drums.wav").write_bytes(b"w")
+        (stem_dir / "drums.wav").write_bytes(b"w")
+        return stem_dir / "no_drums.wav"
 
     monkeypatch.setattr(sep, "separate", fake_separate)
     monkeypatch.setattr(
@@ -378,6 +469,7 @@ def test_workflow_cleanup_on_success(monkeypatch, tmp_path, fake_file) -> None:
         "mux_video_audio",
         lambda v, a, o: o.write_bytes(b"final"),
     )
+    monkeypatch.setattr(sep, "_run_command", lambda *a, **k: None)
 
     sep.run_dedrum_workflow("https://youtu.be/abc", str(tmp_path / "output"))
 
@@ -391,7 +483,23 @@ def test_workflow_output_naming(monkeypatch, tmp_path, fake_file) -> None:
     monkeypatch.setattr(sep, "check_environment", lambda: True)
     monkeypatch.setattr(sep, "download_video", lambda url, d: fake_file)
     monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
-    monkeypatch.setattr(sep, "separate", lambda *a, **k: tmp_path / "no_drums.wav")
+
+    def fake_separate(source, out, model, convert_mp3=False):
+        out = Path(out)
+        stem_dir = out / "Song"
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "no_drums.wav").write_bytes(b"w")
+        (stem_dir / "drums.wav").write_bytes(b"w")
+        return stem_dir / "no_drums.wav"
+
+    monkeypatch.setattr(sep, "separate", fake_separate)
+    monkeypatch.setattr(
+        sep,
+        "mux_video_audio",
+        lambda v, a, o: (muxed.update(out=o), o.write_bytes(b"final")),
+    )
+    # Avoid real ffmpeg for the drums conversion
+    monkeypatch.setattr(sep, "_run_command", lambda *a, **k: None)
     muxed = {}
     monkeypatch.setattr(
         sep,

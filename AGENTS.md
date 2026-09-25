@@ -83,7 +83,11 @@ prettier  # formatting for JSON, Markdown, YAML
    - `yt-dlp` → temporary `.mp3` (for URLs)
    - `demucs --two-stems drums` → `drums.wav` + `no_drums.wav` (MPS if available)
    - `ffmpeg` → WAV converted to MP3 with `<song>_<stem>.mp3` naming
-3. **Output**: `output/<song>/`
+3. **Output**:
+   - URL (video workflow): `output/<title>_no_drums.mp4` plus the isolated
+     drums as `output/<title>_drums.mp3` (or `<title>_drums.wav` with
+     `--drums-format wav`, which skips re-encoding)
+   - Local audio file: `output/<song>/<song>_<stem>.mp3`
 
 ## ⚠️ Critical rules
 

@@ -37,8 +37,6 @@ unavailable and that CPU processing will be used.
 
 ## Installation
 
-## Installation
-
 ### Quick install (recommended)
 
 ```bash
@@ -46,48 +44,6 @@ unavailable and that CPU processing will be used.
 brew install ffmpeg yt-dlp
 
 # 2. Install de-drum (creates .venv/, installs Python deps)
-npm install
-
-# 3. Verify GPU acceleration
-npm run check
-```
-
-You should see:
-
-```
-PyTorch 2.x.x
-✓ MPS (Metal GPU) is available
-✓ PyTorch built with MPS support
-✓ ffmpeg found
-✓ yt-dlp found
-```
-
-### Interactive installer
-
-For a guided setup that checks versions and prompts before installing:
-
-```bash
-npm run install:interactive
-```
-
-Or run directly:
-
-```bash
-python3 scripts/install.py
-```
-
-Options:
-- `--yes` / `-y` — assume yes to all prompts
-- `--skip-system` — skip system dependency installation
-- `--skip-venv` — skip venv creation (use existing)
-
-`npm install` automatically creates a Python virtual environment (`.venv/`) and installs all dependencies — no manual `pip` steps needed.
-
-```bash
-# 1. Install system dependencies (if you don't have them)
-brew install ffmpeg yt-dlp
-
-# 2. Install de-drum
 npm install
 
 # 3. Verify GPU acceleration
@@ -132,21 +88,25 @@ npm run dedrum -- path/to/song.mp3
 npm run dedrum -- --help
 ```
 
-| Flag             | Description                                            |
-| ---------------- | ------------------------------------------------------ |
-| `--model <name>` | Demucs model: `htdemucs` (default), `htdemucs_ft`, ... |
-| `--output <dir>` | Output directory (default: `output/`)                  |
-| `--check`        | Verify the environment and exit                        |
-| `-v, --verbose`  | Show debug logs                                        |
+| Flag                 | Description                                                                   |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `--model <name>`     | Demucs model: `htdemucs` (default), `htdemucs_ft`, ...                        |
+| `--drums-format <f>` | Format for the isolated drums file (video workflow): `mp3` (default) or `wav` |
+| `--output <dir>`     | Output directory (default: `output/`)                                         |
+| `--check`            | Verify the environment and exit                                               |
+| `-v, --verbose`      | Show debug logs                                                               |
 
 ### Output
 
-For YouTube URLs, the final de-drummed video is saved as `output/<title>_no_drums.mp4`:
+For YouTube URLs, the de-drummed video and the isolated drums are saved to `output/`:
 
 ```
 output/
-└── Bohemian Rhapsody_no_drums.mp4
+├── Bohemian Rhapsody_no_drums.mp4
+└── Bohemian Rhapsody_drums.mp3
 ```
+
+The isolated drums are saved as MP3 by default. Use `--drums-format wav` to keep Demucs' WAV output as-is (no re-encoding):
 
 For local audio files, the stems are saved to `output/<song>/`:
 
@@ -165,7 +125,8 @@ output/
 2. **Download** (URL only): `yt-dlp` fetches the video-only stream (MP4) and the audio (MP3) into temporary directories
 3. **Separation**: Demucs (`htdemucs`) splits the audio into `drums` and `no_drums` stems, using the Metal GPU (MPS) when available
 4. **Muxing**: `ffmpeg` copies the original video stream and combines it with the `no_drums` audio (AAC) into `<title>_no_drums.mp4`
-5. **Output**: `output/<title>_no_drums.mp4` — temporary files are cleaned up automatically
+5. **Drums**: the isolated `drums` stem is kept as `output/<title>_drums.mp3` (or `<title>_drums.wav` with `--drums-format wav`)
+6. **Output**: `output/<title>_no_drums.mp4` — temporary files are cleaned up automatically
 
 ---
 

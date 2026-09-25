@@ -147,6 +147,12 @@ def _run_command(cmd: list[str], label: str) -> None:
         ) from exc
 
 
+def _assert_nonempty(path: Path, label: str) -> None:
+    """Raise ``RuntimeError`` if ``path`` is missing or zero-sized."""
+    if not path.exists() or path.stat().st_size == 0:
+        raise RuntimeError(f"{label} produced no output at {path}")
+
+
 def download_video(url: str, output_dir: str) -> Path:
     """Download the video-only stream from a YouTube URL using yt-dlp.
 
@@ -310,22 +316,8 @@ def separate(
         wav_files = list(final_out.glob("*.wav"))
         for wav in wav_files:
             stem = wav.stem  # e.g. "drums" or "no_drums"
-            mp3_name = f"{source_path.stem}_{stem}.mp3"
-            mp3_path = final_out / mp3_name
-            _run_command(
-                [
-                    "ffmpeg",
-                    "-i",
-                    str(wav),
-                    "-codec:a",
-                    "libmp3lame",
-                    "-qscale:a",
-                    "0",
-                    "-y",
-                    str(mp3_path),
-                ],
-                "ffmpeg MP3 conversion",
-            )
+            mp3_path = final_out / f"{source_path.stem}_{stem}.mp3"
+            _encode_wav_to_mp3(wav, mp3_path)
             wav.unlink()  # remove the original WAV
 
     no_drums_mp3 = final_out / f"{source_path.stem}_no_drums.mp3"
@@ -343,6 +335,24 @@ def separate(
     console.print()
 
     return no_drums_mp3
+
+
+def _encode_wav_to_mp3(src: Path, dest: Path) -> None:
+    """Encode a WAV file to MP3 (libmp3lame, qscale 0), raising on failure."""
+    _run_command(
+        [
+            "ffmpeg",
+            "-i",
+            str(src),
+            "-codec:a",
+            "libmp3lame",
+            "-qscale:a",
+            "0",
+            "-y",
+            str(dest),
+        ],
+        "ffmpeg MP3 conversion",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +423,12 @@ def mux_video_audio(video_path: Path, audio_path: Path, output_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
-def run_dedrum_workflow(url: str, output_dir: str, model: str = "htdemucs") -> Path:
+def run_dedrum_workflow(
+    url: str,
+    output_dir: str,
+    model: str = "htdemucs",
+    drums_format: str = "mp3",
+) -> Path:
     """Run the full de-drum workflow for a YouTube URL.
 
     Steps: verify the environment, download the video and audio streams into
@@ -424,13 +439,21 @@ def run_dedrum_workflow(url: str, output_dir: str, model: str = "htdemucs") -> P
         url: YouTube URL.
         output_dir: Directory where the final MP4 will be saved.
         model: Demucs model name (default: htdemucs).
+        drums_format: Format for the isolated drums file: ``mp3`` (default,
+            re-encodes the WAV) or ``wav`` (moves the Demucs WAV as-is, no
+            extra processing).
 
     Returns:
         Path to the final de-drummed video: ``<output_dir>/<title>_no_drums.mp4``.
+        The isolated drums are also kept as ``<output_dir>/<title>_drums.mp3``,
+        or ``<output_dir>/<title>_drums.wav`` when ``drums_format`` is ``wav``.
 
     Raises:
+        ValueError: If ``drums_format`` is not ``mp3`` or ``wav``.
         RuntimeError: If any step (download, separation, muxing) fails.
     """
+    if drums_format not in ("mp3", "wav"):
+        raise ValueError(f"Invalid drums_format: {drums_format!r} (use 'mp3' or 'wav')")
     if not check_environment():
         raise RuntimeError(
             "Environment check failed — run `npm run check` for details."
@@ -454,15 +477,29 @@ def run_dedrum_workflow(url: str, output_dir: str, model: str = "htdemucs") -> P
         safe_title = _sanitize_filename(video_path.stem)
         output_path = out_dir / f"{safe_title}_no_drums.mp4"
         mux_video_audio(video_path, no_drums_wav, output_path)
+        _assert_nonempty(output_path, "de-drummed video")
 
-        # Final artifact validation before cleanup
-        if not output_path.exists() or output_path.stat().st_size == 0:
-            raise RuntimeError(f"Workflow produced no output video at {output_path}")
+        # 4. Keep the isolated drums stem in the requested format
+        drums_wav = Path(tmp_stems) / audio_path.stem / "drums.wav"
+        if not drums_wav.exists():
+            raise RuntimeError(
+                f"Separation produced no drums.wav next to {no_drums_wav}"
+            )
+        drums_out = out_dir / f"{safe_title}_drums.{drums_format}"
+        if drums_format == "wav":
+            shutil.copy2(drums_wav, drums_out)
+            _assert_nonempty(drums_out, "WAV copy")
+        else:
+            _encode_wav_to_mp3(drums_wav, drums_out)
 
     console.print()
     console.print(
         f"[bold green]🎵 Done![/bold green] De-drummed video at "
         f"[bold]{output_path.resolve()}[/bold]"
+    )
+    console.print(
+        f"[bold green]🥁 Done![/bold green] Isolated drums at "
+        f"[bold]{drums_out.resolve()}[/bold]"
     )
     return output_path
 
@@ -487,6 +524,13 @@ def main() -> None:
         default="htdemucs",
         choices=["htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi"],
         help="Demucs model to use (default: htdemucs).",
+    )
+    parser.add_argument(
+        "--drums-format",
+        default="mp3",
+        choices=["mp3", "wav"],
+        help="Format for the isolated drums file (default: mp3; wav keeps "
+        "Demucs' WAV without re-encoding).",
     )
     parser.add_argument(
         "--output",
@@ -538,7 +582,7 @@ def main() -> None:
 
     try:
         if is_url:
-            run_dedrum_workflow(source, args.output, args.model)
+            run_dedrum_workflow(source, args.output, args.model, args.drums_format)
         else:
             no_drums = separate(source, args.output, args.model)
             console.print()
