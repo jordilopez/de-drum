@@ -94,6 +94,10 @@ Downloads the video, removes the drums from the audio, and muxes the result into
 npm run dedrum -- "https://youtube.com/watch?v=..."
 ```
 
+Extra query parameters in the URL (e.g. `list`, `radio`, `si`, `t`) are stripped
+automatically — only the `v` (watch id) parameter is kept, so playlist or radio
+links can't alter the download.
+
 ### From a local audio file
 
 Separates the stems without muxing (no video involved):
@@ -141,8 +145,8 @@ output/
 
 ## How it works
 
-1. **Input**: a YouTube URL (video workflow) or a local audio file
-2. **Download** (URL only): `yt-dlp` fetches the video-only stream (MP4) and the audio (MP3) into temporary directories
+1. **Input**: a YouTube URL (video workflow) or a local audio file. Unwanted query parameters are stripped from the URL, keeping only the watch id (`v`)
+2. **Download** (URL only): `yt-dlp` fetches the video and audio as a single merged file (MP4), and `ffmpeg` extracts the audio (MP3) into a temporary directory
 3. **Separation**: Demucs (`htdemucs`) splits the audio into `drums` and `no_drums` stems, using the Metal GPU (MPS) when available
 4. **Muxing**: `ffmpeg` copies the original video stream and combines it with the `no_drums` audio (AAC) into `<title>_no_drums.mp4`
 5. **Drums**: the isolated `drums` stem is kept as `output/<title>_drums.mp3` (or `<title>_drums.wav` with `--drums-format wav`)

@@ -46,6 +46,15 @@ def fake_file(tmp_path):
     return f
 
 
+def _stub_extract_audio(tmp_path: Path):
+    """Return a stubbed ``extract_audio`` that yields ``<tmp_path>/Song.mp3``."""
+
+    def _fake(source, d):
+        return tmp_path / "Song.mp3"
+
+    return _fake
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke tests (subprocess, no mocking)
 # ---------------------------------------------------------------------------
@@ -93,7 +102,7 @@ def test_help_flag() -> None:
 
 
 def test_download_video_command(monkeypatch, tmp_path) -> None:
-    """download_video must use yt-dlp with video-only MP4 format."""
+    """download_video must use yt-dlp with merged video+audio format."""
     fake = FakeRun(stdout=str(tmp_path / "Video.mp4"))
     monkeypatch.setattr(sep.subprocess, "run", fake)
     (tmp_path / "Video.mp4").write_bytes(b"v")
@@ -103,10 +112,11 @@ def test_download_video_command(monkeypatch, tmp_path) -> None:
     cmd = fake.commands[0]
     assert cmd[0] == "yt-dlp"
     assert "--no-playlist" in cmd
-    assert "--print" in cmd and "after_move:filepath" in cmd
+    assert "--merge-output-format" in cmd
+    assert cmd[cmd.index("--merge-output-format") + 1] == "mp4"
     fmt = cmd[cmd.index("-f") + 1]
-    assert fmt == "bestvideo[ext=mp4]/bestvideo*"
-    assert "https://youtu.be/abc" in cmd
+    assert fmt == "bv*[ext=mp4]+ba/b[ext=mp4]"
+    assert "--print" in cmd and "after_move:filepath" in cmd
     assert result == tmp_path / "Video.mp4"
 
 
@@ -120,35 +130,39 @@ def test_download_video_failure_raises(monkeypatch, tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# download_audio
+# extract_audio
 # ---------------------------------------------------------------------------
 
 
-def test_download_audio_command(monkeypatch, tmp_path) -> None:
-    """download_audio must extract MP3 with --no-playlist."""
-    fake = FakeRun(stdout=str(tmp_path / "Song.mp3"))
-    monkeypatch.setattr(sep.subprocess, "run", fake)
-    (tmp_path / "Song.mp3").write_bytes(b"a")
+def test_extract_audio_command(monkeypatch, tmp_path, fake_file) -> None:
+    """extract_audio must run ffmpeg with -vn and produce <stem>.mp3."""
+    commands: list[list[str]] = []
+    audio_path = tmp_path / f"{fake_file.stem}.mp3"
 
-    result = sep.download_audio("https://youtu.be/abc", str(tmp_path))
+    def fake_run(cmd, **kwargs):
+        commands.append(list(cmd))
+        Path(cmd[-1]).write_bytes(b"a")
+        return SimpleNamespace(stdout="", returncode=0)
 
-    cmd = fake.commands[0]
-    assert cmd[0] == "yt-dlp"
-    assert "--extract-audio" in cmd
-    assert "--audio-format" in cmd and "mp3" in cmd
-    assert "--no-playlist" in cmd
-    assert "--print" in cmd and "after_move:filepath" in cmd
-    assert "https://youtu.be/abc" in cmd
-    assert result == tmp_path / "Song.mp3"
+    monkeypatch.setattr(sep.subprocess, "run", fake_run)
+
+    result = sep.extract_audio(fake_file, str(tmp_path))
+
+    cmd = commands[0]
+    assert cmd[0] == "ffmpeg"
+    assert "-vn" in cmd
+    assert cmd[cmd.index("-codec:a") + 1] == "libmp3lame"
+    assert cmd[-1] == str(audio_path)
+    assert result == audio_path
 
 
-def test_download_audio_failure_raises(monkeypatch, tmp_path) -> None:
-    """A yt-dlp failure must raise RuntimeError."""
+def test_extract_audio_failure_raises(monkeypatch, tmp_path, fake_file) -> None:
+    """An ffmpeg failure must raise RuntimeError."""
     fake = FakeRun(fail=True)
     monkeypatch.setattr(sep.subprocess, "run", fake)
 
-    with pytest.raises(RuntimeError, match="yt-dlp failed"):
-        sep.download_audio("https://youtu.be/abc", str(tmp_path))
+    with pytest.raises(RuntimeError, match="audio encoding"):
+        sep.extract_audio(fake_file, str(tmp_path))
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +322,7 @@ def test_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
         fake_file.write_bytes(b"v")
         return fake_file
 
-    def fake_download_audio(url, d):
+    def fake_extract_audio(source, d):
         calls.append("audio")
         audio = Path(d) / "Song.mp3"
         audio.write_bytes(b"a")
@@ -337,7 +351,7 @@ def test_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
     monkeypatch.setattr(sep, "_run_command", fake_ffmpeg)
 
     monkeypatch.setattr(sep, "download_video", fake_download_video)
-    monkeypatch.setattr(sep, "download_audio", fake_download_audio)
+    monkeypatch.setattr(sep, "extract_audio", fake_extract_audio)
     monkeypatch.setattr(sep, "separate", fake_separate)
     monkeypatch.setattr(sep, "mux_video_audio", fake_mux)
 
@@ -358,7 +372,7 @@ def test_workflow_keeps_isolated_drums(monkeypatch, tmp_path) -> None:
     video = tmp_path / "Song.mp4"
     video.write_bytes(b"v")
     monkeypatch.setattr(sep, "download_video", lambda url, d: video)
-    monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
+    monkeypatch.setattr(sep, "extract_audio", _stub_extract_audio(tmp_path))
 
     def fake_separate(source, out, model, convert_mp3=False):
         out = Path(out)
@@ -390,7 +404,7 @@ def test_workflow_drums_wav_format(monkeypatch, tmp_path) -> None:
     video = tmp_path / "Song.mp4"
     video.write_bytes(b"v")
     monkeypatch.setattr(sep, "download_video", lambda url, d: video)
-    monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
+    monkeypatch.setattr(sep, "extract_audio", _stub_extract_audio(tmp_path))
 
     def fake_separate(source, out, model, convert_mp3=False):
         out = Path(out)
@@ -442,7 +456,7 @@ def test_workflow_cleanup_on_success(monkeypatch, tmp_path, fake_file) -> None:
         video.write_bytes(b"v")
         return video
 
-    def fake_download_audio(url, d):
+    def fake_extract_audio(source, d):
         Path(d).mkdir(parents=True, exist_ok=True)
         created_dirs.append(Path(d))
         audio = Path(d) / "Song.mp3"
@@ -451,7 +465,7 @@ def test_workflow_cleanup_on_success(monkeypatch, tmp_path, fake_file) -> None:
 
     monkeypatch.setattr(sep, "check_environment", lambda: True)
     monkeypatch.setattr(sep, "download_video", fake_download_video)
-    monkeypatch.setattr(sep, "download_audio", fake_download_audio)
+    monkeypatch.setattr(sep, "extract_audio", fake_extract_audio)
 
     def fake_separate(source, out, model, convert_mp3=False):
         out = Path(out)
@@ -482,7 +496,7 @@ def test_workflow_output_naming(monkeypatch, tmp_path, fake_file) -> None:
     """The final MP4 must use the sanitized video title + _no_drums suffix."""
     monkeypatch.setattr(sep, "check_environment", lambda: True)
     monkeypatch.setattr(sep, "download_video", lambda url, d: fake_file)
-    monkeypatch.setattr(sep, "download_audio", lambda url, d: tmp_path / "Song.mp3")
+    monkeypatch.setattr(sep, "extract_audio", _stub_extract_audio(tmp_path))
 
     def fake_separate(source, out, model, convert_mp3=False):
         out = Path(out)
@@ -493,12 +507,6 @@ def test_workflow_output_naming(monkeypatch, tmp_path, fake_file) -> None:
         return stem_dir / "no_drums.wav"
 
     monkeypatch.setattr(sep, "separate", fake_separate)
-    monkeypatch.setattr(
-        sep,
-        "mux_video_audio",
-        lambda v, a, o: (muxed.update(out=o), o.write_bytes(b"final")),
-    )
-    # Avoid real ffmpeg for the drums conversion
     monkeypatch.setattr(sep, "_run_command", lambda *a, **k: None)
     muxed = {}
     monkeypatch.setattr(
@@ -556,3 +564,41 @@ def test_sanitize_filename() -> None:
     assert sep._sanitize_filename('a/b\\c"d|e*f<g>h') == "a_b_c_d_e_f_g_h"
     assert sep._sanitize_filename("  .title.  ") == "title"
     assert sep._sanitize_filename("clean-name") == "clean-name"
+
+
+# ---------------------------------------------------------------------------
+# YouTube URL cleaning
+# ---------------------------------------------------------------------------
+
+
+def test_clean_youtube_url_keeps_only_v() -> None:
+    """All query params except ``v`` must be stripped."""
+    url = "https://www.youtube.com/watch?v=abc123&list=PLxyz&radio=1&si=token&t=42s"
+    assert sep.clean_youtube_url(url) == "https://www.youtube.com/watch?v=abc123"
+
+
+def test_clean_youtube_url_no_params_unchanged() -> None:
+    """URLs without a ``v`` param (or without query) must be returned as-is."""
+    assert sep.clean_youtube_url("https://youtu.be/abc123") == "https://youtu.be/abc123"
+    assert (
+        sep.clean_youtube_url("https://www.youtube.com/playlist?list=PLxyz")
+        == "https://www.youtube.com/playlist?list=PLxyz"
+    )
+
+
+def test_clean_youtube_url_only_v_unchanged() -> None:
+    """A watch URL that already has only ``v`` must round-trip unchanged."""
+    url = "https://www.youtube.com/watch?v=abc123"
+    assert sep.clean_youtube_url(url) == url
+
+
+def test_clean_youtube_url_preserves_fragment() -> None:
+    """The URL fragment must survive the query rewrite."""
+    url = "https://www.youtube.com/watch?v=abc123&list=PLxyz#t=30s"
+    assert sep.clean_youtube_url(url) == "https://www.youtube.com/watch?v=abc123#t=30s"
+
+
+def test_clean_youtube_url_repeated_v_keeps_first() -> None:
+    """Duplicated ``v`` params keep the first occurrence."""
+    url = "https://www.youtube.com/watch?v=first123&v=second45"
+    assert sep.clean_youtube_url(url) == "https://www.youtube.com/watch?v=first123"

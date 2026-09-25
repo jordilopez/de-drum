@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Separate drums from a video: download, demucs, and mux the de-drummed video.
 
-The main workflow takes a YouTube URL, downloads the video and audio streams,
+The main workflow takes a YouTube URL, downloads the media,
 separates the drum track from the audio with Demucs (MPS accelerated when
 available), and muxes the original video with the ``no_drums`` audio back into
 a single MP4.
@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import warnings
 from pathlib import Path
 
@@ -82,6 +83,27 @@ def check_environment() -> bool:
 # ---------------------------------------------------------------------------
 # yt-dlp downloads
 # ---------------------------------------------------------------------------
+
+
+def clean_youtube_url(url: str) -> str:
+    """Strip all query parameters from a YouTube URL except ``v`` (the watch ID).
+
+    Extra params like ``list``, ``radio``, ``si``, ``t``, etc. can redirect the
+    download to a playlist or mixed selection; only the video id is needed.
+
+    Args:
+        url: Source URL.
+
+    Returns:
+        URL with only the ``v`` query parameter kept. URLs without a
+        ``v`` parameter are returned unchanged.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    params = urllib.parse.parse_qs(parsed.query)
+    if "v" not in params:
+        return url
+    cleaned = parsed._replace(query=urllib.parse.urlencode({"v": params["v"][0]}))
+    return urllib.parse.urlunsplit(cleaned)
 
 
 def _sanitize_filename(name: str) -> str:
@@ -154,10 +176,12 @@ def _assert_nonempty(path: Path, label: str) -> None:
 
 
 def download_video(url: str, output_dir: str) -> Path:
-    """Download the video-only stream from a YouTube URL using yt-dlp.
+    """Download the media from a YouTube URL using yt-dlp.
 
-    Prefers a video-only MP4 (best quality available); the audio track is
-    discarded since the de-drummed audio is muxed back in later.
+    Downloads video and audio as a single merged file (avoids a second
+    stream request, which YouTube sometimes rejects with HTTP 403). The
+    audio track is later extracted with ffmpeg; the video stream is reused
+    for muxing.
 
     Args:
         url: YouTube URL.
@@ -168,6 +192,7 @@ def download_video(url: str, output_dir: str) -> Path:
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    url = clean_youtube_url(url)
 
     # yt-dlp template: save as <output_dir>/<title>.<ext>
     template = str(out_dir / "%(title)s.%(ext)s")
@@ -176,7 +201,9 @@ def download_video(url: str, output_dir: str) -> Path:
         "yt-dlp",
         "--no-playlist",
         "-f",
-        "bestvideo[ext=mp4]/bestvideo*",
+        "bv*[ext=mp4]+ba/b[ext=mp4]",
+        "--merge-output-format",
+        "mp4",
         "--output",
         template,
         "--print",
@@ -190,40 +217,23 @@ def download_video(url: str, output_dir: str) -> Path:
     return video_path
 
 
-def download_audio(url: str, output_dir: str) -> Path:
-    """Download audio from a YouTube URL using yt-dlp.
+def extract_audio(source: Path, output_dir: str) -> Path:
+    """Extract the audio track of a media file as MP3 using ffmpeg.
 
     Args:
-        url: YouTube URL.
-        output_dir: Directory where the audio file will be saved.
+        source: Media file containing an audio stream.
+        output_dir: Directory where the MP3 will be saved.
 
     Returns:
-        Path to the downloaded audio file.
+        Path to the extracted ``<source_stem>.mp3`` file.
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = out_dir / f"{source.stem}.mp3"
 
-    # yt-dlp template: save as <output_dir>/<title>.mp3
-    template = str(out_dir / "%(title)s.%(ext)s")
-
-    cmd = [
-        "yt-dlp",
-        "--extract-audio",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "0",
-        "--output",
-        template,
-        "--no-playlist",
-        "--print",
-        "after_move:filepath",
-        url,
-    ]
-
-    console.print(f"Downloading audio from [cyan]{url}[/cyan]...")
-    audio_path = _run_yt_dlp(cmd, url)
-    console.print(f"[green]✓[/green] Downloaded [bold]{audio_path.name}[/bold]")
+    console.print(f"Extracting audio from [cyan]{source.name}[/cyan]...")
+    _encode_to_mp3(source, audio_path)
+    console.print(f"[green]✓[/green] Extracted [bold]{audio_path.name}[/bold]")
     return audio_path
 
 
@@ -317,7 +327,7 @@ def separate(
         for wav in wav_files:
             stem = wav.stem  # e.g. "drums" or "no_drums"
             mp3_path = final_out / f"{source_path.stem}_{stem}.mp3"
-            _encode_wav_to_mp3(wav, mp3_path)
+            _encode_to_mp3(wav, mp3_path)
             wav.unlink()  # remove the original WAV
 
     no_drums_mp3 = final_out / f"{source_path.stem}_no_drums.mp3"
@@ -337,13 +347,17 @@ def separate(
     return no_drums_mp3
 
 
-def _encode_wav_to_mp3(src: Path, dest: Path) -> None:
-    """Encode a WAV file to MP3 (libmp3lame, qscale 0), raising on failure."""
+def _encode_to_mp3(src: Path, dest: Path) -> None:
+    """Encode the audio of any media file to MP3 (libmp3lame, qscale 0).
+
+    ``-vn`` drops the video stream; it is a no-op on audio-only inputs.
+    """
     _run_command(
         [
             "ffmpeg",
             "-i",
             str(src),
+            "-vn",
             "-codec:a",
             "libmp3lame",
             "-qscale:a",
@@ -351,7 +365,7 @@ def _encode_wav_to_mp3(src: Path, dest: Path) -> None:
             "-y",
             str(dest),
         ],
-        "ffmpeg MP3 conversion",
+        "audio encoding",
     )
 
 
@@ -431,8 +445,8 @@ def run_dedrum_workflow(
 ) -> Path:
     """Run the full de-drum workflow for a YouTube URL.
 
-    Steps: verify the environment, download the video and audio streams into
-    temporary directories, separate the audio with Demucs, mux the original
+    Steps: verify the environment, download the media into temporary
+    directories, separate the audio with Demucs, mux the original
     video with the ``no_drums`` audio, and clean up the temporary files.
 
     Args:
@@ -463,12 +477,11 @@ def run_dedrum_workflow(
 
     with (
         tempfile.TemporaryDirectory(prefix="dedrum_video_") as tmp_video,
-        tempfile.TemporaryDirectory(prefix="dedrum_audio_") as tmp_audio,
         tempfile.TemporaryDirectory(prefix="dedrum_stems_") as tmp_stems,
     ):
-        # 1. Download the video (video-only stream) and audio streams
+        # 1. Download the media (video + audio in one request) and extract the audio
         video_path = download_video(url, tmp_video)
-        audio_path = download_audio(url, tmp_audio)
+        audio_path = extract_audio(video_path, tmp_video)
 
         # 2. Separate the drums from the audio (keep the WAV for muxing)
         no_drums_wav = separate(audio_path, tmp_stems, model, convert_mp3=False)
@@ -490,7 +503,7 @@ def run_dedrum_workflow(
             shutil.copy2(drums_wav, drums_out)
             _assert_nonempty(drums_out, "WAV copy")
         else:
-            _encode_wav_to_mp3(drums_wav, drums_out)
+            _encode_to_mp3(drums_wav, drums_out)
 
     console.print()
     console.print(
