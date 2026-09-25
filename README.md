@@ -62,6 +62,26 @@ PyTorch 2.x.x
 
 `npm install` automatically creates a Python virtual environment (`.venv/`) and installs all dependencies — no manual `pip` steps needed.
 
+### Interactive installer
+
+For a guided setup that checks versions and prompts before installing:
+
+```bash
+npm run install:interactive
+```
+
+Or run directly:
+
+```bash
+python3 scripts/install.py
+```
+
+Options:
+
+- `--yes` / `-y` — assume yes to all prompts
+- `--skip-system` — skip system dependency installation
+- `--skip-venv` — skip venv creation (use existing)
+
 ---
 
 ## Usage
