@@ -602,3 +602,220 @@ def test_clean_youtube_url_repeated_v_keeps_first() -> None:
     """Duplicated ``v`` params keep the first occurrence."""
     url = "https://www.youtube.com/watch?v=first123&v=second45"
     assert sep.clean_youtube_url(url) == "https://www.youtube.com/watch?v=first123"
+
+
+# ---------------------------------------------------------------------------
+# extract_stems / run_extract_workflow
+# ---------------------------------------------------------------------------
+
+
+def test_extract_stems_command_and_outputs(monkeypatch, tmp_path, fake_file) -> None:
+    """extract_stems runs full Demucs (no --two-stems) and keeps only the
+    requested stems, converted to MP3."""
+    monkeypatch.setattr(sep.torch.backends.mps, "is_available", lambda: False)
+    fake = FakeRun()
+    monkeypatch.setattr(sep.subprocess, "run", fake)
+    monkeypatch.setattr(sep, "_encode_to_mp3", lambda src, dest: dest.write_bytes(b"m"))
+
+    # Simulate Demucs producing all four stems
+    demucs_dir = tmp_path / "htdemucs" / fake_file.stem
+    demucs_dir.mkdir(parents=True)
+    for stem in ("drums", "bass", "other", "vocals"):
+        (demucs_dir / f"{stem}.wav").write_bytes(b"w")
+
+    results = sep.extract_stems(
+        str(fake_file), str(tmp_path), "htdemucs", stems=("drums", "bass")
+    )
+
+    cmd = fake.commands[0]
+    assert "--two-stems" not in cmd
+    assert cmd[cmd.index("--device") + 1] == "cpu"
+
+    names = [p.name for p in results]
+    assert names == [
+        f"{fake_file.stem}_drums.mp3",
+        f"{fake_file.stem}_bass.mp3",
+    ]
+    for path in results:
+        assert path.exists()
+    # Unwanted stems were discarded
+    assert not (tmp_path / fake_file.stem / "other.wav").exists()
+    assert not (tmp_path / fake_file.stem / "vocals.wav").exists()
+
+
+def test_extract_stems_wav_keeps_originals(monkeypatch, tmp_path, fake_file) -> None:
+    """With audio_format='wav', the Demucs WAVs are kept as-is."""
+    monkeypatch.setattr(sep.torch.backends.mps, "is_available", lambda: False)
+    monkeypatch.setattr(sep.subprocess, "run", FakeRun())
+
+    demucs_dir = tmp_path / "htdemucs" / fake_file.stem
+    demucs_dir.mkdir(parents=True)
+    (demucs_dir / "drums.wav").write_bytes(b"w")
+    (demucs_dir / "bass.wav").write_bytes(b"w")
+
+    results = sep.extract_stems(
+        str(fake_file),
+        str(tmp_path),
+        "htdemucs",
+        stems=("drums", "bass"),
+        audio_format="wav",
+    )
+
+    assert all(p.suffix == ".wav" and p.exists() for p in results)
+
+
+def test_extract_stems_empty_stems_raises(tmp_path, fake_file) -> None:
+    """An empty stems tuple must be rejected."""
+    try:
+        sep.extract_stems(str(fake_file), str(tmp_path), stems=())
+    except ValueError as exc:
+        assert "stem" in str(exc)
+    else:
+        raise AssertionError("ValueError not raised")
+
+
+def test_extract_workflow_happy_path(monkeypatch, tmp_path, fake_file) -> None:
+    """run_extract_workflow downloads, extracts audio, and saves stems — no mux."""
+    calls: list[str] = []
+    monkeypatch.setattr(sep, "check_environment", lambda: calls.append("env") or True)
+    monkeypatch.setattr(
+        sep, "download_video", lambda url, d: calls.append("dl") or fake_file
+    )
+    monkeypatch.setattr(
+        sep, "extract_audio", lambda src, d: calls.append("audio") or src
+    )
+    monkeypatch.setattr(
+        sep,
+        "extract_stems",
+        lambda src, d, model, stems, audio_format="mp3", engine="demucs": (
+            calls.append(f"stems:{stems}")
+            or [tmp_path / "fake_drums.mp3", tmp_path / "fake_bass.mp3"]
+        ),
+    )
+    # Create source files the stub moves around
+    fake_file.write_bytes(b"a")
+    (tmp_path / "fake_drums.mp3").write_bytes(b"d")
+    (tmp_path / "fake_bass.mp3").write_bytes(b"b")
+
+    results = sep.run_extract_workflow(
+        "https://www.youtube.com/watch?v=abc123", str(tmp_path), "htdemucs"
+    )
+
+    assert calls == ["env", "dl", "audio", "stems:('drums', 'bass')"]
+    assert len(results) == 2
+    assert all(p.exists() for p in results)
+    assert all(p.parent.name == fake_file.stem for p in results)
+
+
+# ---------------------------------------------------------------------------
+# Engine selection (demucs vs openunmix)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_stems_invalid_engine_raises(tmp_path, fake_file) -> None:
+    """An unknown engine must be rejected."""
+    try:
+        sep.extract_stems(str(fake_file), str(tmp_path), engine="foo")
+    except ValueError as exc:
+        assert "engine" in str(exc)
+    else:
+        raise AssertionError("ValueError not raised")
+
+
+def test_extract_stems_openunmix_model_fallback(
+    monkeypatch, tmp_path, fake_file
+) -> None:
+    """With the openunmix engine, a demucs model name falls back to umxhq."""
+    monkeypatch.setattr(sep.torch.backends.mps, "is_available", lambda: False)
+    captured = {}
+
+    def fake_sep(source_path, output_dir, model, stems, device):
+        captured["model"] = model
+
+    monkeypatch.setattr(sep, "_separate_with_openunmix", fake_sep)
+    demucs_out = tmp_path / "umxhq" / fake_file.stem
+    demucs_out.mkdir(parents=True)
+    (demucs_out / "drums.wav").write_bytes(b"w")
+    (demucs_out / "bass.wav").write_bytes(b"w")
+
+    sep.extract_stems(
+        str(fake_file),
+        str(tmp_path),
+        model="htdemucs",
+        stems=("drums", "bass"),
+        audio_format="wav",
+        engine="openunmix",
+    )
+
+    assert captured["model"] == "umxhq"
+
+
+def test_separate_with_openunmix_writes_wavs(monkeypatch, tmp_path) -> None:
+    """_separate_with_openunmix must write (channels, samples) WAVs per stem."""
+    import numpy as np
+    import soundfile
+    import torch
+
+    monkeypatch.setattr(sep.torch.backends.mps, "is_available", lambda: False)
+    fake_separate = lambda *a, **k: {  # noqa: E731
+        "drums": torch.ones(1, 2, 100),
+        "bass": torch.full((1, 2, 100), 0.5),
+    }
+    monkeypatch.setattr("openunmix.predict.separate", fake_separate)
+
+    # Real readable audio file (soundfile must be able to open it)
+    source = tmp_path / "Song.wav"
+    soundfile.write(source, np.zeros((10, 2), dtype=np.float32), 44100)
+
+    sep._separate_with_openunmix(
+        source, str(tmp_path), "umxhq", ("drums", "bass"), "cpu"
+    )
+
+    out_dir = tmp_path / "umxhq" / "Song"
+    drums, rate = soundfile.read(out_dir / "drums.wav")
+    assert drums.shape == (100, 2)  # batch dim squeezed
+    assert rate == 44100
+
+
+def test_extract_workflow_passes_engine(monkeypatch, tmp_path, fake_file) -> None:
+    """run_extract_workflow must forward engine to extract_stems."""
+    captured = {}
+    monkeypatch.setattr(sep, "check_environment", lambda: True)
+    monkeypatch.setattr(sep, "download_video", lambda url, d: fake_file)
+    monkeypatch.setattr(sep, "extract_audio", lambda src, d: src)
+
+    def fake_extract_stems(src, d, model, stems, audio_format="mp3", engine="demucs"):
+        captured["engine"] = engine
+        return []
+
+    monkeypatch.setattr(sep, "extract_stems", fake_extract_stems)
+
+    sep.run_extract_workflow("https://youtu.be/abc", str(tmp_path), engine="openunmix")
+    assert captured["engine"] == "openunmix"
+
+
+def test_extract_workflow_invalid_audio_format_raises(tmp_path) -> None:
+    """An invalid audio_format must be rejected before any work happens."""
+    monkeypatch = None  # no monkeypatching needed: validation runs first
+    assert monkeypatch is None
+
+    with pytest.raises(ValueError, match="audio_format"):
+        sep.run_extract_workflow(
+            "https://youtu.be/abc",
+            str(tmp_path / "out"),
+            audio_format="ogg",
+        )
+
+
+def test_cli_model_engine_mismatch_rejected() -> None:
+    """A demucs model with --engine openunmix must exit 1 with a message."""
+    result = _run("/does/not/exist.mp3", "--stems", "drums", "--engine", "openunmix")
+    assert result.returncode == 1
+    assert "not valid for" in result.stdout
+
+
+def test_cli_engine_without_stems_rejected() -> None:
+    """--engine without --stems must exit 1 with guidance."""
+    result = _run("/does/not/exist.mp3", "--engine", "openunmix")
+    assert result.returncode == 1
+    assert "--stems" in result.stdout
