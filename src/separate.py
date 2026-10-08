@@ -242,13 +242,82 @@ def extract_audio(source: Path, output_dir: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _build_demucs_cmd(
+    source_path: Path,
+    output_dir: str,
+    model: str,
+    device: str,
+    two_stems: bool = False,
+) -> list[str]:
+    """Build the Demucs subprocess command for a separation run.
+
+    Args:
+        source_path: Audio file to separate.
+        output_dir: Base output directory (passed to Demucs' ``-o``).
+        model: Demucs model name.
+        device: Torch device (``mps`` or ``cpu``).
+        two_stems: Run in two-stems mode (drums vs. rest). When False, the
+            full multi-stem separation runs.
+
+    Returns:
+        The full command list, ready for ``subprocess.run``.
+    """
+    cmd = [sys.executable, "-m", "demucs"]
+    if two_stems:
+        cmd += ["--two-stems", "drums"]
+    cmd += [
+        "-o",
+        str(Path(output_dir).resolve()),
+        "--device",
+        device,
+        "-n",
+        model,
+        str(source_path.resolve()),
+    ]
+    return cmd
+
+
+def _promote_demucs_output(output_dir: Path, model: str, source_stem: str) -> Path:
+    """Move Demucs' ``<output_dir>/<model>/<song>/`` up to ``<output_dir>/<song>/``.
+
+    Both engines save under a model subdirectory. Promoting keeps the final
+    structure ``<output_dir>/<song>/`` (cleaner for users). The empty model
+    directory is removed when no other tracks are left.
+
+    Args:
+        output_dir: Base output directory.
+        model: Model name used for the separation (subdirectory to promote).
+        source_stem: Stem (file name without extension) of the source audio.
+
+    Returns:
+        The final per-song output directory. If the model subdirectory does
+        not exist (engine saved elsewhere), the engine's own location is
+        returned unchanged.
+    """
+    demucs_out = output_dir / model / source_stem
+    final_out = output_dir / source_stem
+
+    if demucs_out.exists():
+        if final_out.exists():
+            shutil.rmtree(final_out)
+        demucs_out.rename(final_out)
+
+        model_dir = output_dir / model
+        if model_dir.exists() and not any(model_dir.iterdir()):
+            model_dir.rmdir()
+        return final_out
+
+    # Engine saved outside the expected layout — use its location as-is.
+    return demucs_out
+
+
 def separate(
     source: str,
     output_dir: str,
     model: str = "htdemucs",
     convert_mp3: bool = True,
 ) -> Path:
-    """Run Demucs separation on a local audio file.
+    """Run Demucs two-stems separation (drums vs. rest) on a local audio file.
 
     Demucs saves to ``<output_dir>/<model>/<stem>/`` by default. After
     separation we move the files up one level so the final structure is
@@ -279,40 +348,12 @@ def separate(
         f"using [cyan]{model}[/cyan] on [bright_blue]{device}[/bright_blue]..."
     )
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "demucs",
-        "--two-stems",
-        "drums",
-        "-o",
-        str(Path(output_dir).resolve()),
-        "--device",
-        device,
-        "-n",
-        model,
-        str(source_path.resolve()),
-    ]
+    cmd = _build_demucs_cmd(source_path, output_dir, model, device, two_stems=True)
 
     with console.status("[bold green]Processing...") as _:
         _run_command(cmd, "Demucs")
 
-    # Demucs saves to <output_dir>/<model>/<stem>/ — move files to <output_dir>/<stem>/
-    demucs_out = Path(output_dir) / model / source_path.stem
-    final_out = Path(output_dir) / source_path.stem
-
-    if demucs_out.exists():
-        if final_out.exists():
-            shutil.rmtree(final_out)
-        demucs_out.rename(final_out)
-
-        # Remove empty model directory if no other tracks are left
-        model_dir = Path(output_dir) / model
-        if model_dir.exists() and not any(model_dir.iterdir()):
-            model_dir.rmdir()
-    else:
-        # If the model subdirectory doesn't exist, Demucs may have saved directly
-        final_out = demucs_out
+    final_out = _promote_demucs_output(Path(output_dir), model, source_path.stem)
 
     no_drums_wav = final_out / "no_drums.wav"
 
@@ -345,6 +386,157 @@ def separate(
     console.print()
 
     return no_drums_mp3
+
+
+def extract_stems(
+    source: str,
+    output_dir: str,
+    model: str = "htdemucs",
+    stems: tuple[str, ...] = ("drums", "bass"),
+    audio_format: str = "mp3",
+    engine: str = "demucs",
+) -> list[Path]:
+    """Extract individual stems (e.g. drums and bass) from an audio file.
+
+    Two engines are supported:
+
+    - ``demucs`` (default): runs the full Demucs separation (all stems of
+      the selected model) and keeps the requested ones.
+    - ``openunmix``: PyTorch separator (models ``umxhq`` and ``umxl``) that
+      estimates only the requested stems. It uses ``niter=0`` for faster
+      processing without iterative refinement.
+
+    Args:
+        source: Path to an audio file.
+        output_dir: Directory to save the results.
+        model: Model name. For ``demucs``: ``htdemucs`` (default). For
+            ``openunmix``: ``umxhq`` (default) or ``umxl``.
+        stems: Stem names to keep (e.g. ``("drums", "bass")``).
+        audio_format: Output format: ``mp3`` (default) or ``wav`` (keeps
+            the engine's WAV output without re-encoding).
+        engine: ``demucs`` (default) or ``openunmix``.
+
+    Returns:
+        Paths to the extracted files, one per requested stem.
+
+    Raises:
+        ValueError: If ``stems`` is empty or ``audio_format``/``engine`` is
+            invalid.
+        RuntimeError: If the source file is missing or separation fails.
+    """
+    if engine not in ("demucs", "openunmix"):
+        raise ValueError(f"Invalid engine: {engine!r} (use 'demucs' or 'openunmix')")
+    if not stems:
+        raise ValueError("At least one stem must be requested")
+    if audio_format not in ("mp3", "wav"):
+        raise ValueError(f"Invalid audio_format: {audio_format!r} (use 'mp3' or 'wav')")
+
+    source_path = Path(source)
+    if not source_path.exists():
+        raise RuntimeError(f"File not found: {source}")
+
+    if engine == "openunmix" and not model.startswith("umx"):
+        model = "umxhq"
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    console.print(
+        f"Extracting stems [bold]{', '.join(stems)}[/bold] from "
+        f"[bold]{source_path.name}[/bold] using [cyan]{engine}/{model}[/cyan] "
+        f"on [bright_blue]{device}[/bright_blue]..."
+    )
+
+    if engine == "openunmix":
+        _separate_with_openunmix(source_path, output_dir, model, stems, device)
+    else:
+        cmd = _build_demucs_cmd(source_path, output_dir, model, device)
+        with console.status("[bold green]Processing...") as _:
+            _run_command(cmd, "Demucs")
+
+    final_out = _promote_demucs_output(Path(output_dir), model, source_path.stem)
+
+    results: list[Path] = []
+    for stem in stems:
+        wav = final_out / f"{stem}.wav"
+        if not wav.exists():
+            raise RuntimeError(f"Separation produced no {stem}.wav in {final_out}")
+        if audio_format == "wav":
+            results.append(wav)
+            continue
+        mp3 = final_out / f"{source_path.stem}_{stem}.mp3"
+        _encode_to_mp3(wav, mp3)
+        wav.unlink()
+        results.append(mp3)
+
+    # Remove stems that were not requested
+    if audio_format == "mp3":
+        for wav in final_out.glob("*.wav"):
+            wav.unlink()
+
+    console.print()
+    for path in results:
+        size = path.stat().st_size / 1024 / 1024
+        console.print(f"[green]✓[/green] [bold]{path.name}[/bold] ({size:.1f} MB)")
+    console.print()
+
+    return results
+
+
+def _separate_with_openunmix(
+    source_path: Path,
+    output_dir: str,
+    model: str,
+    stems: tuple[str, ...],
+    device: str,
+) -> None:
+    """Run Open-Unmix separation and write WAVs in the Demucs output layout.
+
+    Produces ``<output_dir>/<model>/<song>/<stem>.wav`` so the shared
+    post-processing in :func:`extract_stems` works unchanged.
+
+    Args:
+        source_path: Audio file to separate.
+        output_dir: Base output directory.
+        model: Open-Unmix model (``umxhq`` or ``umxl``).
+        stems: Stems to estimate (must be ones the model provides).
+        device: Torch device (``mps`` or ``cpu``).
+
+    Raises:
+        RuntimeError: If Open-Unmix is missing or estimation fails.
+    """
+    try:
+        import soundfile
+        from openunmix import predict
+    except ImportError as exc:
+        raise RuntimeError(
+            "Open-Unmix not installed — run `pip install openunmix soundfile` "
+            "inside the project venv"
+        ) from exc
+
+    audio, rate = soundfile.read(source_path, dtype="float32", always_2d=True)
+    audio_tensor = torch.from_numpy(audio.T)  # (channels, samples)
+
+    with console.status("[bold green]Processing...") as _:
+        try:
+            estimates = predict.separate(
+                audio_tensor,
+                rate=rate,
+                model_str_or_path=model,
+                targets=stems,
+                device=device,
+                niter=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - normalize to RuntimeError
+            raise RuntimeError(f"Open-Unmix separation failed: {exc}") from exc
+
+    out_dir = Path(output_dir) / model / source_path.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for stem, tensor in estimates.items():
+        wav_path = out_dir / f"{stem}.wav"
+        audio_out = tensor.detach().cpu().numpy()
+        # Open-Unmix returns (batch, channels, samples); squeeze batch dim
+        if audio_out.ndim == 3:
+            audio_out = audio_out[0]
+        soundfile.write(wav_path, audio_out.T, rate)
 
 
 def _encode_to_mp3(src: Path, dest: Path) -> None:
@@ -517,6 +709,72 @@ def run_dedrum_workflow(
     return output_path
 
 
+def run_extract_workflow(
+    url: str,
+    output_dir: str,
+    model: str = "htdemucs",
+    stems: tuple[str, ...] = ("drums", "bass"),
+    audio_format: str = "mp3",
+    engine: str = "demucs",
+) -> list[Path]:
+    """Download a YouTube video's audio and extract the requested stems.
+
+    Unlike :func:`run_dedrum_workflow`, no video muxing happens — only the
+    isolated stems are kept.
+
+    Args:
+        url: YouTube URL.
+        output_dir: Directory where the stem files will be saved.
+        model: Model name (default: htdemucs; for openunmix use umxhq/umxl).
+        stems: Stem names to keep (e.g. ``("drums", "bass")``).
+        audio_format: Output format: ``mp3`` (default) or ``wav``.
+        engine: ``demucs`` (default) or ``openunmix``.
+
+    Returns:
+        Paths to the extracted stem files, saved as
+        ``<output_dir>/<title>/<source_stem>_<stem>.<ext>``.
+
+    Raises:
+        ValueError: If ``audio_format`` is not ``mp3`` or ``wav``.
+        RuntimeError: If any step (download, separation) fails.
+    """
+    if audio_format not in ("mp3", "wav"):
+        raise ValueError(f"Invalid audio_format: {audio_format!r} (use 'mp3' or 'wav')")
+    if not check_environment():
+        raise RuntimeError(
+            "Environment check failed — run `npm run check` for details."
+        )
+
+    with (
+        tempfile.TemporaryDirectory(prefix="dedrum_video_") as tmp_video,
+        tempfile.TemporaryDirectory(prefix="dedrum_stems_") as tmp_stems,
+    ):
+        video_path = download_video(url, tmp_video)
+        audio_path = extract_audio(video_path, tmp_video)
+        results = extract_stems(
+            audio_path,
+            tmp_stems,
+            model,
+            stems=stems,
+            audio_format=audio_format,
+            engine=engine,
+        )
+
+        # Move the results into the final output directory under <title>/
+        out_dir = Path(output_dir) / _sanitize_filename(video_path.stem)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        final_paths: list[Path] = []
+        for path in results:
+            dest = out_dir / path.name
+            shutil.move(path, dest)
+            final_paths.append(dest)
+
+    console.print()
+    for path in final_paths:
+        console.print(f"[bold green]✓[/bold green] Saved [bold]{path.resolve()}[/bold]")
+    return final_paths
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -535,8 +793,23 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default="htdemucs",
-        choices=["htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi"],
-        help="Demucs model to use (default: htdemucs).",
+        help="Model name. For --engine demucs: htdemucs (default), "
+        "htdemucs_ft, htdemucs_6s, hdemucs_mmi. For --engine openunmix: "
+        "umxhq (default) or umxl.",
+    )
+    parser.add_argument(
+        "--stems",
+        default=None,
+        help="Extract individual stems (e.g. 'drums,bass') instead of "
+        "de-drumming. For URLs this skips the video muxing and only saves "
+        "the requested stems; for local files it keeps only those stems.",
+    )
+    parser.add_argument(
+        "--engine",
+        default="demucs",
+        choices=["demucs", "openunmix"],
+        help="Separation engine (default: demucs). openunmix uses the "
+        "MIT-licensed UMX models (umxhq/umxl).",
     )
     parser.add_argument(
         "--drums-format",
@@ -571,6 +844,22 @@ def main() -> None:
         handlers=[RichHandler(rich_tracebacks=True)],
     )
 
+    demucs_models = ("htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi")
+    openunmix_models = ("umxhq", "umxl")
+    if args.engine != "demucs" and not args.stems:
+        console.print(
+            "[red]Error:[/red] --engine only applies to stem extraction — "
+            "pass --stems (e.g. --stems drums,bass) when using --engine."
+        )
+        sys.exit(1)
+    valid_models = openunmix_models if args.engine == "openunmix" else demucs_models
+    if args.model not in valid_models:
+        console.print(
+            f"[red]Error:[/red] --model {args.model!r} is not valid for "
+            f"--engine {args.engine}. Valid models: {', '.join(valid_models)}"
+        )
+        sys.exit(1)
+
     if args.check:
         try:
             check_environment()
@@ -595,7 +884,28 @@ def main() -> None:
 
     try:
         if is_url:
-            run_dedrum_workflow(source, args.output, args.model, args.drums_format)
+            if args.stems:
+                stems = tuple(s.strip() for s in args.stems.split(",") if s.strip())
+                run_extract_workflow(
+                    source,
+                    args.output,
+                    args.model,
+                    stems,
+                    args.drums_format,
+                    args.engine,
+                )
+            else:
+                run_dedrum_workflow(source, args.output, args.model, args.drums_format)
+        elif args.stems:
+            stems = tuple(s.strip() for s in args.stems.split(",") if s.strip())
+            extract_stems(
+                source,
+                args.output,
+                args.model,
+                stems,
+                args.drums_format,
+                args.engine,
+            )
         else:
             no_drums = separate(source, args.output, args.model)
             console.print()

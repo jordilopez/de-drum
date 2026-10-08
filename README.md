@@ -98,6 +98,39 @@ Extra query parameters in the URL (e.g. `list`, `radio`, `si`, `t`) are stripped
 automatically — only the `v` (watch id) parameter is kept, so playlist or radio
 links can't alter the download.
 
+### Extracting individual stems (drums + bass)
+
+To only extract specific stems (no de-drummed video muxing):
+
+```bash
+npm run dedrum -- "https://youtube.com/watch?v=..." --stems drums,bass
+npm run dedrum -- path/to/song.mp3 --stems drums,bass
+```
+
+Comma-separated stem names from the full `htdemucs` separation: `drums`,
+`bass`, `other`, `vocals`. Everything not requested is discarded.
+
+### Comparing engines: Demucs vs Open-Unmix
+
+Two separation engines are available. Demucs is the default. Open-Unmix
+supports the `umxhq` and `umxl` models and can also be selected for YouTube
+URLs or local files:
+
+```bash
+# Demucs (default)
+npm run dedrum -- path/to/song.mp3 --stems drums,bass
+
+# Open-Unmix with its default model (umxhq)
+npm run dedrum -- path/to/song.mp3 --stems drums,bass --engine openunmix
+
+# Open-Unmix with the larger umxl model
+npm run dedrum -- "https://youtube.com/watch?v=..." --stems drums,bass --engine openunmix --model umxl
+```
+
+Open-Unmix uses `niter=0` for faster processing without iterative
+refinement. Check the upstream model and weight licenses before using either
+engine in a commercial service.
+
 ### From a local audio file
 
 Separates the stems without muxing (no video involved):
@@ -112,13 +145,15 @@ npm run dedrum -- path/to/song.mp3
 npm run dedrum -- --help
 ```
 
-| Flag                 | Description                                                                   |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `--model <name>`     | Demucs model: `htdemucs` (default), `htdemucs_ft`, ...                        |
-| `--drums-format <f>` | Format for the isolated drums file (video workflow): `mp3` (default) or `wav` |
-| `--output <dir>`     | Output directory (default: `output/`)                                         |
-| `--check`            | Verify the environment and exit                                               |
-| `-v, --verbose`      | Show debug logs                                                               |
+| Flag                 | Description                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `--model <name>`     | Model for the selected engine: Demucs `htdemucs` (default), `htdemucs_ft`, `htdemucs_6s`, `hdemucs_mmi`; Open-Unmix `umxhq` or `umxl` |
+| `--engine <name>`    | Stem-separation engine: `demucs` (default) or `openunmix`; use with `--stems`                                                         |
+| `--stems <list>`     | Extract individual stems (e.g. `drums,bass`) instead of de-drumming; skips video muxing                                               |
+| `--drums-format <f>` | Output format for extracted stems: `mp3` (default) or `wav`                                                                           |
+| `--output <dir>`     | Output directory (default: `output/`)                                                                                                 |
+| `--check`            | Verify the environment and exit                                                                                                       |
+| `-v, --verbose`      | Show debug logs                                                                                                                       |
 
 ### Output
 
@@ -128,6 +163,16 @@ For YouTube URLs, the de-drummed video and the isolated drums are saved to `outp
 output/
 ├── Bohemian Rhapsody_no_drums.mp4
 └── Bohemian Rhapsody_drums.mp3
+```
+
+For stem extraction (`--stems`), the requested stems are saved to
+`output/<title>/`:
+
+```
+output/
+└── Bohemian Rhapsody/
+    ├── Bohemian Rhapsody_drums.mp3
+    └── Bohemian Rhapsody_bass.mp3
 ```
 
 The isolated drums are saved as MP3 by default. Use `--drums-format wav` to keep Demucs' WAV output as-is (no re-encoding):
