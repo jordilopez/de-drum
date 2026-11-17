@@ -98,6 +98,17 @@ Extra query parameters in the URL (e.g. `list`, `radio`, `si`, `t`) are stripped
 automatically — only the `v` (watch id) parameter is kept, so playlist or radio
 links can't alter the download.
 
+### Downloading MP3 conversationally
+
+For audio-only downloads without stem separation:
+
+```bash
+npm run download -- "https://youtube.com/watch?v=..."
+```
+
+The MP3 is saved to `output/<title>.mp3`. Use `--output <dir>` to choose a
+different directory.
+
 ### From a local audio file
 
 Separates the stems without muxing (no video involved):
